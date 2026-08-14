@@ -105,7 +105,9 @@ public final class GuiManager implements Listener {
         h.getInventory().setItem(49, button(Material.CHEST, "§a邮箱: " + pending + "/" + plugin.mailbox().capacity(),
                 "§7/ct mail 查看 · /ct collect 一键领取"));
         h.getInventory().setItem(52, button(Material.BARRIER, "§c关闭"));
-        h.getInventory().setItem(53, button(Material.EMERALD, "§a绿宝石: " + Items.currencyCount(p)));
+        h.getInventory().setItem(53, button(Material.EMERALD, "§a绿宝石",
+                "§7银行余额: §a" + fmt(plugin.bank().balance(p.getUniqueId().toString())),
+                "§7背包实物: §a" + fmt(Items.currencyCount(p))));
         p.openInventory(h.getInventory());
     }
 
@@ -147,7 +149,8 @@ public final class GuiManager implements Listener {
                 "§7在售: " + total + " · 仅管理员挂售",
                 "§7当前倍率: §a" + String.format("%.3f", luxury.multiplier()) + "×",
                 "§7成交价 = 基础价 × 倍率",
-                "§7银行余额: §a" + fmt(plugin.bank().balance(p.getUniqueId().toString()))));
+                "§7银行余额: §a" + fmt(plugin.bank().balance(p.getUniqueId().toString())),
+                "§7背包实物: §a" + fmt(Items.currencyCount(p))));
         h.getInventory().setItem(52, button(Material.BARRIER, "§c关闭"));
         h.getInventory().setItem(53, button(Material.ARROW, "§a下一页"));
         p.openInventory(h.getInventory());
