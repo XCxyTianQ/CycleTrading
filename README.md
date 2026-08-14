@@ -1,0 +1,47 @@
+# CycleTrading
+
+以【绿宝石】为唯一通货的 Minecraft 经济/交易插件，运行于 AzureBranches **EXP5Plus**（Folia fork，MC 26.1.2，Java 25）。
+
+## 六大板块
+
+| 板块 | 说明 |
+|---|---|
+| 💰 绿宝石挂单市场 | 玩家自由挂单/购买，绿宝石结算，上架即托管（防复制），卖家收益入银行 |
+| 🏦 银行 | 虚拟绿宝石数据库（突破 64 堆叠），存取/转账/冻结/审计流水 |
+| 💎 奢侈品商店 | 仅管理员挂售珍稀物品；成交价 = 基础价 × (1 + 总存量 ÷ 锚点) 动态加权 |
+| 📬 邮箱 | 只收不存（仅系统投递），储量上限 27，GUI 单件领取 |
+| 📈 定期债券 | 五档定期（3/7/14/30/60 游戏日），利率按总存量加权购买时锁定，退一法取整 |
+| 📦 期货交割市场 | 9 个标准大宗合约，全额保证金零违约，按游戏日到期实物交割 |
+
+> 死亡保险板块暂缓发布（`insurance.enabled: false`）。
+
+## 命令入口
+
+所有功能统一入口 `/ct`（别名 `/cycletrading`、`/market`）：
+
+```
+/ct market [页]           市场 GUI          /ct sell <价格>       上架
+/ct my                    我的挂单          /ct mail / ct collect 邮箱
+/ct bank ...              银行（存取/转账/后台）
+/ct lux ...               奢侈品商店        /ct bond ...          定期债券
+/ct fut ...               期货交割市场      /ct admin reload      重载配置
+```
+
+详见 `docs/ARCHITECTURE.md`（架构设计与各模块数据模型）与发布包内 `DEPLOY.md`（部署说明）。
+
+## 构建
+
+```powershell
+.\gradlew.bat build --offline   # 需要 Java 25；依赖 paper-api 26.1.2.build.74-stable（已缓存可离线）
+# 产物: build\libs\cycletrading-folia-1.0.0.jar
+```
+
+## 部署
+
+1. `cycletrading-folia-1.0.0.jar` 放入服务端 `plugins/`
+2. 启动服务端（AzureBranches EXP5Plus，MC 26.1.2）
+3. `plugins/cycletrading/config.yml` 按需调整，`/ct admin reload` 热重载
+
+## 许可证
+
+MIT

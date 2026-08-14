@@ -1,0 +1,50 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.cycletrading'
+version = '1.0.0'
+
+base {
+    archivesName = 'cycletrading-folia'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+}
+
+dependencies {
+    // Paper/Folia 插件 API（与 AzureBranches EXP5Plus 同版本，MC 26.1.2）
+    compileOnly 'io.papermc.paper:paper-api:26.1.2.build.74-stable'
+
+    // JSON 持久化（运行时由服务端 libraries 提供，版本与运行时一致：2.13.2）
+    compileOnly 'com.google.code.gson:gson:2.13.2'
+
+    // AzureBranches 的 patched 服务端 jar（NMS：net.minecraft.*，需要时使用）
+    // 来源: F:\AzureCore\AzureBranches\folia-server\build\libs\versions\26.1.2\folia-26.1.2.jar
+    compileOnly files('F:/AzureCore/AzureBranches/folia-server/build/libs/versions/26.1.2/folia-26.1.2.jar')
+
+    // 服务端运行时依赖（netty / authlib / gson 等）：
+    // patched jar 不含第三方库，它们位于 paperclip 工作目录 libraries/ 下。
+    // 来源: F:\AzureCore\AzureBranches\folia-server\build\libs\libraries\*.jar
+    compileOnly fileTree(dir: 'F:/AzureCore/AzureBranches/folia-server/build/libs/libraries', include: '**/*.jar')
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = 'UTF-8'
+    it.options.release = 25
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('plugin.yml') {
+        expand 'version': project.version
+    }
+}

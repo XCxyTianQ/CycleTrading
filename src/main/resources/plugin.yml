@@ -1,0 +1,19 @@
+name: cycletrading
+version: ${version}
+main: com.cycletrading.CycleTradingPlugin
+api-version: "1.21"
+folia-supported: true
+description: "Emerald-settled player market for AzureBranches EXP5Plus (Folia, MC 26.1.2)"
+author: CycleTrading
+commands:
+  cycletrading:
+    description: "CycleTrading 绿宝石市场"
+    usage: "/ct <market|sell|my|collect|help>"
+    aliases: [ct, market]
+permissions:
+  cycletrading.use:
+    description: "使用市场（挂单/购买/领取）"
+    default: true
+  cycletrading.admin:
+    description: "管理命令（reload）"
+    default: op

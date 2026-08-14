@@ -1,0 +1,93 @@
+# CycleTrading 配置
+# 绿宝石为唯一通货：所有挂单价格与成交结算均以绿宝石计。
+
+# 成交税（%），从卖家收益中扣除；0 = 无税（完全自由贸易）
+tax-percent: 0.0
+
+# 挂单价格允许范围（单位：绿宝石）
+min-price: 1
+max-price: 100000000
+
+# 银行（虚拟绿宝石数据库）
+bank:
+  # 单账户余额上限（存款/后台设置受此限制；市场收益入账不受限，避免阻断交易）
+  max-balance: 999999999999
+  # 审计流水保留条数（超出后先进先出淘汰）
+  ledger-keep: 5000
+
+# 奢侈品商店（仅管理员挂售，动态定价保证稀缺性）
+luxury:
+  # 定价锚点：全服玩家银行总存量 = 锚点 时，倍率 = 2
+  supply-anchor: 1000000
+  # 倍率上限（防止价格失控）
+  max-multiplier: 100.0
+  # 管理员基础定价上限（绿宝石）
+  max-base-price: 100000000
+
+# 死亡保险（定档投保；配合关闭死亡不掉落使用；保费统一由管理员在此规定）
+# 注意：保险板块暂缓发布，默认关闭；启用后死亡回滚按档位生效
+insurance:
+  enabled: false
+  t1-price: 10        # 档位1：仅回滚快捷栏
+  t2-price: 20        # 档位2：回滚快捷栏 + 第一排
+  t3-price: 40        # 档位3：回滚全部物品栏 + 快捷栏
+  t4-price: 64        # 档位4：完全回滚（含盔甲/副手）+ 补偿
+  t4-compensation: 10 # 档位4 补偿额（绿宝石，存入虚拟账户）
+
+# 邮箱（只收不存：仅系统投递，玩家无法存入物品）
+mailbox:
+  capacity: 27        # 每玩家储量上限（条）
+
+# 定期债券（仅虚拟绿宝石，按游戏日计息；本金锁死，到期本息自动入账）
+bond:
+  enabled: true
+  rate-anchor: 1000000    # 利率锚点：总存量 = 锚点 时，实际利率 = 基础利率 × 2
+  max-multiplier: 3.0     # 利率倍率上限
+  t1-days: 3              # 档位1：期限（游戏日）
+  t1-rate: 1.0            # 档位1：基础利率（%，单期）
+  t1-min: 100             # 档位1：最低购买量（绿宝石）
+  t2-days: 7
+  t2-rate: 2.0
+  t2-min: 500
+  t3-days: 14
+  t3-rate: 3.5
+  t3-min: 2000
+  t4-days: 30
+  t4-rate: 5.0
+  t4-min: 10000
+  t5-days: 60
+  t5-rate: 8.0
+  t5-min: 50000
+
+# 期货交割市场（标准大宗合约：卖方全额商品托管、买方全额付款锁定，到期实物交割入买方邮箱）
+futures:
+  enabled: true
+  terms: [1, 3, 7, 14, 30]   # 允许的交割期限（游戏日）
+  contracts:                 # 标准合约（品种 = 材料 + 数量，开仓须手持正好该数量）
+    oak_log:
+      material: OAK_LOG
+      amount: 640
+    coal_block:
+      material: COAL_BLOCK
+      amount: 320
+    iron_block:
+      material: IRON_BLOCK
+      amount: 320
+    gold_block:
+      material: GOLD_BLOCK
+      amount: 320
+    redstone_block:
+      material: REDSTONE_BLOCK
+      amount: 320
+    lapis_block:
+      material: LAPIS_BLOCK
+      amount: 320
+    nether_quartz:
+      material: QUARTZ
+      amount: 64
+    diamond_block:
+      material: DIAMOND_BLOCK
+      amount: 64
+    netherite_block:
+      material: NETHERITE_BLOCK
+      amount: 64
