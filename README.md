@@ -33,12 +33,12 @@
 
 ```powershell
 .\gradlew.bat build --offline   # 需要 Java 25；依赖 paper-api 26.1.2.build.74-stable（已缓存可离线）
-# 产物: build\libs\cycletrading-folia-1.0.0.jar
+# 产物: build\libs\cycletrading-folia-1.0.1.jar
 ```
 
 ## 部署
 
-1. `cycletrading-folia-1.0.0.jar` 放入服务端 `plugins/`
+1. `cycletrading-folia-1.0.1.jar` 放入服务端 `plugins/`
 2. 启动服务端（AzureBranches EXP5Plus，MC 26.1.2）
 3. `plugins/cycletrading/config.yml` 按需调整，`/ct admin reload` 热重载
 

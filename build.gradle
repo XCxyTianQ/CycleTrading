@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'com.cycletrading'
-version = '1.0.0'
+version = '1.0.1'
 
 base {
     archivesName = 'cycletrading-folia'
