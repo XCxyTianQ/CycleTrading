@@ -29,16 +29,28 @@
 
 详见 `docs/ARCHITECTURE.md`（架构设计与各模块数据模型）与发布包内 `DEPLOY.md`（部署说明）。
 
+## 期货通俗指南
+
+期货就是**大宗整批货的"先订后交"**：
+
+1. **卖方**把正好一批标准货（如 640 橡木原木）交给系统托管、标好价、约好交货日期（`/ct fut open <价格> <期限>`）
+2. **买方**在 `/ct fut` 市场下单并**先付全款锁定**
+3. 双方都先交全款/全货（**全额保证金**）→ 不会跑单、不会诈骗
+4. **到期自动交割**：货进买方邮箱（`/ct mail` 领取），钱进卖方银行，人不在线也没事
+5. 成交后不能反悔；没卖出去之前卖方可 `/ct fut cancel <编号>` 撤单
+
+游戏内输入 `/ct fut help` 查看同款通俗指南。
+
 ## 构建
 
 ```powershell
 .\gradlew.bat build --offline   # 需要 Java 25；依赖 paper-api 26.1.2.build.74-stable（已缓存可离线）
-# 产物: build\libs\cycletrading-folia-1.0.1.jar
+# 产物: build\libs\cycletrading-folia-1.0.2.jar
 ```
 
 ## 部署
 
-1. `cycletrading-folia-1.0.1.jar` 放入服务端 `plugins/`
+1. `cycletrading-folia-1.0.2.jar` 放入服务端 `plugins/`
 2. 启动服务端（AzureBranches EXP5Plus，MC 26.1.2）
 3. `plugins/cycletrading/config.yml` 按需调整，`/ct admin reload` 热重载
 

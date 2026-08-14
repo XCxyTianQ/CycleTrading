@@ -752,12 +752,31 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         }
         switch (a.toLowerCase()) {
             case "info" -> futInfo(sender);
+            case "help" -> futHelp(sender);
             case "open" -> futOpen(sender, args);
             case "my" -> futMy(sender);
             case "cancel" -> futCancel(sender, args);
             case "admin" -> futAdmin(sender, args);
-            default -> sender.sendMessage("§c用法: /ct fut [页] | info | open <价格> <期限> | my | cancel <编号>");
+            default -> sender.sendMessage("§c用法: /ct fut [页] | help | info | open <价格> <期限> | my | cancel <编号>");
         }
+    }
+
+    /** 期货通俗指南（给不熟悉期货的玩家）。 */
+    private void futHelp(CommandSender s) {
+        s.sendMessage("§e===== 期货交易 · 通俗指南 =====");
+        s.sendMessage("§7期货就是【大宗整批货的\"先订后交\"】：");
+        s.sendMessage("§71. §f卖方§7把正好一批标准货交给系统托管、标好价、约好交货日期");
+        s.sendMessage("§72. §f买方§7先付全款锁定，到期系统自动一手交货、一手付钱");
+        s.sendMessage("§73. §f双方都先交全款/全货§7（全额保证金）→ 不会跑单、不会诈骗");
+        s.sendMessage("§74. §f到期自动交割§7：货进买方邮箱，钱进卖方银行，人不在线也没事");
+        s.sendMessage("§7--- 卖方三步 ---");
+        s.sendMessage("§7凑货(如640橡木原木) → §6/ct fut open <价格> <期限>§7 → 等买家或 §6/ct fut cancel <编号>§7 撤单");
+        s.sendMessage("§7--- 买方三步 ---");
+        s.sendMessage("§6/ct fut§7 逛市场 → 点合约确认付款 → 到期后 §6/ct mail§7 领取货物");
+        s.sendMessage("§7--- 规则 ---");
+        s.sendMessage("§7· 成交后不能反悔（定期合同）；没卖出去之前卖方可随时撤单");
+        s.sendMessage("§7· 交货需要邮箱空格（下单前系统自动检查，不够会提醒你）");
+        s.sendMessage("§7· 标准货品种类与数量见 §6/ct fut info");
     }
 
     private void futInfo(CommandSender s) {
@@ -772,6 +791,7 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         }
         s.sendMessage("§7可选交割期限（游戏日）: " + plugin.futuresTerms());
         s.sendMessage("§7开仓: /ct fut open <价格> <期限>（手持正好标准数量） · 交割商品入买方邮箱，货款税后入银行");
+        s.sendMessage("§7看不懂期货？输入 §6/ct fut help§7 查看通俗指南");
     }
 
     private void futOpen(CommandSender sender, String[] args) {
@@ -942,7 +962,7 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
             return List.of("market", "sell", "my", "collect", "mail", "bank", "lux", "ins", "bond", "fut", "help");
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("fut")) {
-            return List.of("info", "open", "my", "cancel", "admin");
+            return List.of("help", "info", "open", "my", "cancel", "admin");
         }
         if (args.length == 3 && args[0].equalsIgnoreCase("fut") && args[1].equalsIgnoreCase("admin")) {
             return List.of("stats", "deliver", "cancel");
