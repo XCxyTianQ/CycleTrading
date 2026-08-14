@@ -1,0 +1,71 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve package version
+        shell: bash
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "PKG_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "PKG_VERSION=ci-${{ github.run_number }}" >> "$GITHUB_ENV"
+          fi
+          echo "Resolved PKG_VERSION=$PKG_VERSION"
+
+      - name: Build
+        run: gradle build --no-daemon -Pversion="${PKG_VERSION}"
+
+      - name: Assemble release package
+        shell: bash
+        run: |
+          set -e
+          VER="${PKG_VERSION}"
+          OUT="release/cycletrading-${VER}"
+          mkdir -p "${OUT}"
+          cp "build/libs/cycletrading-folia-${VER}.jar" "${OUT}/"
+          cp src/main/resources/config.yml "${OUT}/"
+          cp docs/DEPLOY.md "${OUT}/"
+          (cd release && zip -r "cycletrading-${VER}.zip" "cycletrading-${VER}")
+          ls -la release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          path: |
+            release/*.zip
+            build/libs/*.jar
+
+      - name: Create GitHub Release (tags only)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            "release/cycletrading-${PKG_VERSION}.zip" \
+            "release/cycletrading-${PKG_VERSION}/cycletrading-folia-${PKG_VERSION}.jar" \
+            --title "CycleTrading ${{ github.ref_name }}" \
+            --generate-notes

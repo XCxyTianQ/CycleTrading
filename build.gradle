@@ -3,7 +3,8 @@ plugins {
 }
 
 group = 'com.cycletrading'
-version = '1.0.2'
+// 版本号：CI 打标签构建时用 -Pversion=<tag 去 v 前缀> 覆盖
+version = findProperty('version') ?: '1.0.2'
 
 base {
     archivesName = 'cycletrading-folia'
@@ -26,15 +27,20 @@ dependencies {
 
     // JSON 持久化（运行时由服务端 libraries 提供，版本与运行时一致：2.13.2）
     compileOnly 'com.google.code.gson:gson:2.13.2'
+}
 
-    // AzureBranches 的 patched 服务端 jar（NMS：net.minecraft.*，需要时使用）
-    // 来源: F:\AzureCore\AzureBranches\folia-server\build\libs\versions\26.1.2\folia-26.1.2.jar
-    compileOnly files('F:/AzureCore/AzureBranches/folia-server/build/libs/versions/26.1.2/folia-26.1.2.jar')
-
-    // 服务端运行时依赖（netty / authlib / gson 等）：
-    // patched jar 不含第三方库，它们位于 paperclip 工作目录 libraries/ 下。
-    // 来源: F:\AzureCore\AzureBranches\folia-server\build\libs\libraries\*.jar
-    compileOnly fileTree(dir: 'F:/AzureCore/AzureBranches/folia-server/build/libs/libraries', include: '**/*.jar')
+// 本地开发参考类路径（仅本机存在时加载；插件本身只依赖 paper-api，CI 环境自动跳过）
+def nmsJar = file('F:/AzureCore/AzureBranches/folia-server/build/libs/versions/26.1.2/folia-26.1.2.jar')
+if (nmsJar.exists()) {
+    dependencies {
+        compileOnly files(nmsJar)
+    }
+}
+def libsDir = file('F:/AzureCore/AzureBranches/folia-server/build/libs/libraries')
+if (libsDir.exists()) {
+    dependencies {
+        compileOnly fileTree(dir: libsDir, include: '**/*.jar')
+    }
 }
 
 tasks.withType(JavaCompile).configureEach {
