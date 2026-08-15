@@ -1223,6 +1223,13 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         s.sendMessage("§7· 成交后不能反悔（定期合同）；没卖出去之前卖方可随时撤单");
         s.sendMessage("§7· 交货需要邮箱空格（下单前系统自动检查，不够会提醒你）");
         s.sendMessage("§7· 标准货品种类与数量见 §6/ct fut info");
+        s.sendMessage("§7--- 多空单（看涨/看跌，保证金交易，不搬货） ---");
+        s.sendMessage("§7§f多单 long = 看涨§7：交保证金(入场价×数量)锁仓，到期价涨就赚差价、价跌亏差价");
+        s.sendMessage("§7§f空单 short = 看跌§7：到期价跌就赚差价、价涨亏差价");
+        s.sendMessage("§7· 盈亏封顶 = 保证金 → 最坏亏光保证金，§f绝不会倒欠§7");
+        s.sendMessage("§7· 开仓: §6/ct fut long|short <品种> <数量> <期限>§7（入场价 = 当前结算价）");
+        s.sendMessage("§7· 持仓与浮盈: §6/ct fut pos§7 · 提前平仓: §6/ct fut close <编号>§7（按当前价即时结算）");
+        s.sendMessage("§7· 到期自动按结算价（期货近期均价/参考价）结算入银行");
     }
 
     private void futInfo(CommandSender s) {
@@ -1237,6 +1244,7 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         }
         s.sendMessage("§7可选交割期限（游戏日）: " + plugin.futuresTerms());
         s.sendMessage("§7开仓: /ct fut open <价格> <期限>（手持正好标准数量） · 交割商品入买方邮箱，货款税后入银行");
+        s.sendMessage("§7投机: /ct fut long|short <品种> <数量> <期限> 开多/空单 · /ct fut pos 持仓 · /ct fut close 平仓");
         s.sendMessage("§7看不懂期货？输入 §6/ct fut help§7 查看通俗指南");
     }
 
