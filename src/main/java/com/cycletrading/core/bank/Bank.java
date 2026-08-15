@@ -367,6 +367,24 @@ public final class Bank {
 
     private void record(BankAccount acc, String type, String counterpart, long amount) {
         ledger.add(new TxEntry(nextTxId.getAndIncrement(), now(), type, acc.owner, counterpart, amount, acc.balance));
+        trimLedger();
+    }
+
+    /**
+     * 记录一笔无余额变动的审计痕迹（如实物支付渠道的支出标记）。
+     * 供个人流水查询，不创建账户、不影响存量。
+     */
+    public void recordTrace(String uuid, String name, String type, long amount) {
+        if (uuid == null || amount <= 0) {
+            return;
+        }
+        BankAccount acc = accounts.get(uuid);
+        long balanceAfter = acc == null ? 0 : acc.balance;
+        ledger.add(new TxEntry(nextTxId.getAndIncrement(), now(), type, uuid, null, amount, balanceAfter));
+        trimLedger();
+    }
+
+    private void trimLedger() {
         int keep = plugin.bankLedgerKeep();
         while (ledger.size() > keep) {
             ledger.remove(0);

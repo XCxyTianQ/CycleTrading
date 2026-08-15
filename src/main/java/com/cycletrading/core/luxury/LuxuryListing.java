@@ -11,6 +11,7 @@ public final class LuxuryListing {
     public String item;        // 托管物品 Base64
     public long basePrice;     // 管理员基础定价（绿宝石）
     public String listedBy;    // 挂售管理员名
+    public String listedByUuid; // 挂售管理员 UUID（货款结算账户）
     public long createdAt;     // epoch ms
     public String status;
     public String buyer;       // 成交买家 UUID（SOLD 时有效）
@@ -21,11 +22,12 @@ public final class LuxuryListing {
         // Gson
     }
 
-    public LuxuryListing(long id, String item, long basePrice, String listedBy, long createdAt) {
+    public LuxuryListing(long id, String item, long basePrice, String listedBy, String listedByUuid, long createdAt) {
         this.id = id;
         this.item = item;
         this.basePrice = basePrice;
         this.listedBy = listedBy;
+        this.listedByUuid = listedByUuid;
         this.createdAt = createdAt;
         this.status = ACTIVE;
     }

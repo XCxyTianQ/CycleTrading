@@ -197,6 +197,7 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
             case "deposit" -> bankDeposit(sender, args);
             case "withdraw" -> bankWithdraw(sender, args);
             case "send" -> bankSend(sender, args);
+            case "ledger" -> bankLedger(sender, args);
             case "admin" -> bankAdmin(sender, args);
             default -> bankStatus(sender);
         }
@@ -216,6 +217,34 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
             p.sendMessage("§c⚠ 账户已被冻结，禁止存取/转账/购买");
         }
         p.sendMessage("§7存款: /ct bank deposit [数量|all]  ·  取款: /ct bank withdraw <数量|all>");
+        p.sendMessage("§7个人流水: /ct bank ledger [条数]");
+    }
+
+    /** 个人流水（任何玩家可查自己的最近交易）。 */
+    private void bankLedger(CommandSender sender, String[] args) {
+        if (!requirePlayer(sender)) {
+            return;
+        }
+        Player p = (Player) sender;
+        int n = 5;
+        if (args.length > 2) {
+            try {
+                n = Math.max(1, Math.min(20, Integer.parseInt(args[2])));
+            } catch (NumberFormatException ignored) {
+                // 默认 5
+            }
+        }
+        List<TxEntry> txs = bank.recent(p.getUniqueId().toString(), n);
+        if (txs.isEmpty()) {
+            p.sendMessage("§7暂无个人流水记录");
+            return;
+        }
+        p.sendMessage("§e===== 个人流水（最近 " + txs.size() + " 笔）=====");
+        SimpleDateFormat f = new SimpleDateFormat("MM-dd HH:mm:ss");
+        for (TxEntry t : txs) {
+            p.sendMessage("§7#" + t.id + " [" + f.format(new Date(t.ts)) + "] §6" + t.type
+                    + " §e" + fmt(t.amount) + " §7→ 余额 " + fmt(t.balanceAfter));
+        }
     }
 
     private void bankDeposit(CommandSender sender, String[] args) {
@@ -472,7 +501,7 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
             return;
         }
         p.getInventory().setItemInMainHand(new ItemStack(Material.AIR));
-        long id = luxury.create(p.getName(), hand, base).id;
+        long id = luxury.create(p.getName(), p.getUniqueId().toString(), hand, base).id;
         p.sendMessage("§6已挂售！编号 #" + id + " · 基础价 " + fmt(base) + " 绿宝石"
                 + " · 当前成交价 " + fmt(luxury.effectivePrice(base)) + " 绿宝石"
                 + "§7（用 /ct lux 查看商店）");
@@ -1029,7 +1058,7 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
             return List.of("stats", "view");
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("bank")) {
-            return List.of("deposit", "withdraw", "send", "admin");
+            return List.of("deposit", "withdraw", "send", "ledger", "admin");
         }
         if (args.length == 3 && args[0].equalsIgnoreCase("bank") && args[1].equalsIgnoreCase("admin")) {
             return List.of("view", "set", "add", "remove", "freeze", "unfreeze", "ledger");

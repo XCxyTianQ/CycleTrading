@@ -4,10 +4,12 @@ import com.cycletrading.CycleTradingPlugin;
 import com.cycletrading.core.Items;
 import com.cycletrading.core.bank.Bank;
 import com.cycletrading.core.bank.TxEntry;
+import com.cycletrading.sched.Scheduler;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -21,8 +23,7 @@ import org.bukkit.inventory.ItemStack;
  *   成交价 = max(基础定价, round(基础定价 × 倍率))
  *   倍率   = 1 + 全服玩家银行总存量 ÷ 定价锚点，受 max-multiplier 上限约束
  *
- * 经济闭环：成交款进入系统国库（SYSTEM，不计入玩家总存量）→ 奢侈品消费是货币回收池，
- * 购买行为降低总存量、压低后续倍率，系统自动稳定。
+ * 结算：买方货款（税后）直接入【挂售管理员】银行账户（交易基本语义：卖方必须收款）。
  * 买家支付与市场一致：虚拟余额优先，实物兜底。
  */
 public final class LuxuryMarket {
@@ -71,9 +72,9 @@ public final class LuxuryMarket {
     // ---------- 挂售 / 下架（仅管理员） ----------
 
     /** 创建挂单（调用方已在玩家线程移除手持物品，权限已校验）。 */
-    public LuxuryListing create(String listedBy, ItemStack item, long basePrice) {
+    public LuxuryListing create(String listedBy, String listedByUuid, ItemStack item, long basePrice) {
         long id = nextId.getAndIncrement();
-        LuxuryListing l = new LuxuryListing(id, Items.toBase64(item), basePrice, listedBy, System.currentTimeMillis());
+        LuxuryListing l = new LuxuryListing(id, Items.toBase64(item), basePrice, listedBy, listedByUuid, System.currentTimeMillis());
         listings.put(id, l);
         plugin.storage().requestSave();
         return l;
@@ -175,10 +176,10 @@ public final class LuxuryMarket {
             return BuyResult.NOT_ACTIVE;
         }
 
-        // 支付
+        // 支付（奢侈品专属流水类型 LUX_BUY，虚拟/实物均留痕）
         boolean paidVirtual = false;
         if (payVirtual) {
-            if (bank.tryDebit(buyerUuid, price)) {
+            if (bank.debit(buyerUuid, price, TxEntry.LUX_BUY)) {
                 paidVirtual = true;
             } else {
                 payVirtual = false;
@@ -191,6 +192,7 @@ public final class LuxuryMarket {
                 l.buyer = null;
                 return BuyResult.INSUFFICIENT_FUNDS;
             }
+            bank.recordTrace(buyerUuid, buyer.getName(), TxEntry.LUX_BUY, price);
         }
 
         // 交付买家（预检保证成功；失败则回滚 + 同源退款）
@@ -209,11 +211,31 @@ public final class LuxuryMarket {
             }
         }
 
-        // 成交款入国库（货币回收池）
-        bank.credit(Bank.SYSTEM, "SYSTEM", price, TxEntry.LUX_SELL);
+        // 结算卖方：税后货款直接入【挂售管理员】银行账户（交易基本语义：卖方必须收款）
+        long earnings = price - taxOf(price);
+        String listerUuid = l.listedByUuid;
+        if (earnings > 0 && listerUuid != null) {
+            bank.credit(listerUuid, l.listedBy, earnings, TxEntry.LUX_SELL);
+        }
+        if (listerUuid != null) {
+            Player lister = plugin.getServer().getPlayer(UUID.fromString(listerUuid));
+            if (lister != null && lister.isOnline()) {
+                Scheduler.onPlayer(plugin, lister, sp -> sp.sendMessage("§a你的奢侈品 #" + id
+                        + " 已售出，货款 §e" + earnings + " 绿宝石§a已入银行"
+                        + (taxOf(price) > 0 ? "§7（税后）" : "")), null);
+            }
+        }
 
         plugin.storage().requestSave();
         return BuyResult.SUCCESS;
+    }
+
+    private long taxOf(long price) {
+        double pct = plugin.taxPercent();
+        if (pct <= 0) {
+            return 0;
+        }
+        return (long) Math.floor(price * pct / 100.0);
     }
 
     // ---------- 存档 ----------
@@ -224,6 +246,10 @@ public final class LuxuryMarket {
 
     public void restore(LuxuryListing l) {
         if (l != null) {
+            // 旧版数据迁移：无 listedByUuid 时按名字解析（仅影响升级前未售出的挂单）
+            if (l.listedByUuid == null && l.listedBy != null) {
+                l.listedByUuid = plugin.getServer().getOfflinePlayer(l.listedBy).getUniqueId().toString();
+            }
             listings.put(l.id, l);
         }
     }

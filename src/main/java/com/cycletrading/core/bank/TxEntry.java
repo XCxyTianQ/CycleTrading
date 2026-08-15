@@ -9,6 +9,7 @@ public final class TxEntry {
     public static final String SEND_OUT = "SEND_OUT";
     public static final String SEND_IN = "SEND_IN";
     public static final String BUY = "BUY";          // 市场购买支付
+    public static final String LUX_BUY = "LUX_BUY";  // 奢侈品购买支付（买方个人流水专属标记）
     public static final String SELL = "SELL";        // 市场售出收益
     public static final String LUX_SELL = "LUX_SELL"; // 奢侈品成交款入国库
     public static final String BOND_BUY = "BOND_BUY";                 // 债券购买（本金锁定扣款）
