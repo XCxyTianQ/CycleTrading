@@ -17,6 +17,10 @@ public final class TxEntry {
     public static final String FUTURES_BUY = "FUTURES_BUY";           // 期货成交付款（锁定）
     public static final String FUTURES_SELL = "FUTURES_SELL";         // 期货交割货款入账
     public static final String FUTURES_REFUND = "FUTURES_REFUND";     // 期货撤销退款
+    public static final String FUT_POS_OPEN = "FUT_POS_OPEN";         // 期货开仓（保证金扣款）
+    public static final String FUT_POS_MARGIN = "FUT_POS_MARGIN";     // 保证金入清算所
+    public static final String FUT_POS_RETURN = "FUT_POS_RETURN";     // 头寸结算实付（玩家收入）
+    public static final String FUT_POS_SETTLE = "FUT_POS_SETTLE";     // 清算所结算支出
     public static final String OPTION_OPEN = "OPTION_OPEN";           // 期权开仓（保证金托管扣款）
     public static final String OPTION_PREMIUM = "OPTION_PREMIUM";     // 期权权利金（买方支出）
     public static final String OPTION_PREMIUM_IN = "OPTION_PREMIUM_IN"; // 期权权利金（卖方收入）

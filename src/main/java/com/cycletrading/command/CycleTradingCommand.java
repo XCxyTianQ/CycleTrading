@@ -10,6 +10,7 @@ import com.cycletrading.core.bond.Bond;
 import com.cycletrading.core.bond.BondService;
 import com.cycletrading.core.futures.Commodity;
 import com.cycletrading.core.futures.FuturesContract;
+import com.cycletrading.core.futures.FuturesPosition;
 import com.cycletrading.core.futures.FuturesService;
 import com.cycletrading.core.gold.GoldService;
 import com.cycletrading.core.luxury.LuxuryMarket;
@@ -99,6 +100,8 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         s.sendMessage("§6/ct fut [页]    §7期货市场（标准大宗合约）");
         s.sendMessage("§6/ct fut info    §7标准合约品种与交割期限");
         s.sendMessage("§6/ct fut open <价格> <期限> §7手持标准数量商品开仓");
+        s.sendMessage("§6/ct fut long|short <品种> <数量> <期限> §7开多/空单（保证金交易）");
+        s.sendMessage("§6/ct fut pos / close <编号> §7我的头寸 / 提前平仓");
         s.sendMessage("§6/ct fut my      §7我的期货合约（撤单/交割状态）");
         s.sendMessage("§6/ct opt [页]    §7期权市场（看涨/看跌，现金结算）");
         s.sendMessage("§6/ct opt help    §7期权通俗指南");
@@ -841,6 +844,8 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
                 + " · 可支配 " + fmt(gold.freeTreasury()) + ")");
         s.sendMessage("§6金条: §a" + fmt(gold.price()) + " 绿宝石/根 §7(发行 " + fmt(gold.total())
                 + " · 在外 " + fmt(gold.outstanding()) + ")");
+        s.sendMessage("§6期货清算所: §a" + fmt(bank.balance(Bank.CLEARING)) + " §7(未平头寸敞口 "
+                + fmt(futures.openExposure()) + ")");
         s.sendMessage("§6Lux 倍率: §a" + String.format("%.3f", luxury.multiplier()) + "×§7(锚点 "
                 + fmt(plugin.luxurySupplyAnchor()) + (plugin.getLuxAnchorOverride() > 0 ? "，央行覆盖" : "") + ")");
         s.sendMessage("§6债券倍率: §a" + String.format("%.3f", bonds.rateMultiplier()) + "×§7(锚点 "
@@ -1097,8 +1102,108 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
             case "open" -> futOpen(sender, args);
             case "my" -> futMy(sender);
             case "cancel" -> futCancel(sender, args);
+            case "long" -> futPosOpen(sender, args, true);
+            case "short" -> futPosOpen(sender, args, false);
+            case "pos" -> futPos(sender);
+            case "close" -> futPosClose(sender, args);
             case "admin" -> futAdmin(sender, args);
-            default -> sender.sendMessage("§c用法: /ct fut [页] | help | info | open <价格> <期限> | my | cancel <编号>");
+            default -> sender.sendMessage("§c用法: /ct fut [页] | help | info | open <价格> <期限> | long|short <品种> <数量> <期限> | pos | close <编号> | my | cancel <编号>");
+        }
+    }
+
+    // ---------- 多空头寸 ----------
+
+    private void futPosOpen(CommandSender sender, String[] args, boolean isLong) {
+        if (!requirePlayer(sender)) {
+            return;
+        }
+        Player p = (Player) sender;
+        if (args.length < 5) {
+            p.sendMessage("§c用法: /ct fut " + (isLong ? "long" : "short") + " <品种> <数量> <期限>");
+            return;
+        }
+        String key = args[2];
+        long qty;
+        int term;
+        try {
+            qty = Long.parseLong(args[3]);
+            term = Integer.parseInt(args[4]);
+        } catch (NumberFormatException ex) {
+            p.sendMessage("§c数量/期限必须是整数");
+            return;
+        }
+        FuturesService.PosOpenResult r = futures.validateOpenPos(p, isLong ? "LONG" : "SHORT", key, qty, term);
+        switch (r) {
+            case SUCCESS -> {
+                FuturesPosition pos = futures.openPos(p, isLong ? "LONG" : "SHORT", key, qty, term);
+                if (pos == null) {
+                    p.sendMessage("§c开仓失败（余额变化），请重试");
+                } else {
+                    p.sendMessage("§a开" + (isLong ? "多" : "空") + "成功！#" + pos.id + " · " + key + " ×" + qty
+                            + " · 入场价 §e" + fmt(pos.entry) + " §a· 保证金 §e" + fmt(pos.margin)
+                            + " §a· 期限 " + term + " 游戏日" + "§7（/ct fut pos 查看，/ct fut close 提前平仓）");
+                }
+            }
+            case FROZEN -> p.sendMessage("§c账户已被冻结");
+            case INSUFFICIENT_FUNDS -> p.sendMessage("§c银行余额不足以支付保证金（入场价×数量）");
+            case INVALID_TYPE -> p.sendMessage("§c类型错误");
+            case INVALID_COMMODITY -> p.sendMessage("§c未知品种，见 /ct fut info");
+            case NO_ANCHOR -> p.sendMessage("§c该品种暂无结算价锚，无法开仓");
+            case INVALID_QTY -> p.sendMessage("§c数量必须大于 0");
+            case INVALID_TERM -> p.sendMessage("§c期限必须为（游戏日）: " + plugin.futuresTerms());
+            case DISABLED -> p.sendMessage("§c期货市场暂未启用");
+        }
+    }
+
+    private void futPos(CommandSender sender) {
+        if (!requirePlayer(sender)) {
+            return;
+        }
+        Player p = (Player) sender;
+        List<FuturesPosition> list = futures.positionsOf(p.getUniqueId().toString());
+        p.sendMessage("§e===== 我的期货头寸 =====");
+        if (list.isEmpty()) {
+            p.sendMessage("§7暂无头寸。开仓: /ct fut long|short <品种> <数量> <期限>");
+            return;
+        }
+        for (FuturesPosition pos : list) {
+            if (pos.isOpen()) {
+                Long s = futures.anchorOf(pos.commodity);
+                long unrealized = pos.isLong() ? (s - pos.entry) * pos.qty : (pos.entry - s) * pos.qty;
+                p.sendMessage("§6#" + pos.id + " " + (pos.isLong() ? "多" : "空") + " " + pos.commodity
+                        + " ×" + pos.qty + " §7· 入场 " + fmt(pos.entry) + " · 现锚 " + fmt(s)
+                        + " · 浮盈 §e" + (unrealized >= 0 ? "+" : "") + fmt(unrealized)
+                        + " §7· 剩余 " + futures.posDaysLeft(pos) + " 游戏日");
+            } else {
+                p.sendMessage("§7#" + pos.id + " 已结算 · 结算价 " + fmt(pos.settlementPrice)
+                        + " · 盈亏 §e" + (pos.pnl >= 0 ? "+" : "") + fmt(pos.pnl) + " · 实付 " + fmt(pos.payout));
+            }
+        }
+        p.sendMessage("§7提前平仓: /ct fut close <编号>（按当前锚即时结算）");
+    }
+
+    private void futPosClose(CommandSender sender, String[] args) {
+        if (!requirePlayer(sender)) {
+            return;
+        }
+        Player p = (Player) sender;
+        if (args.length < 3) {
+            p.sendMessage("§c用法: /ct fut close <编号>");
+            return;
+        }
+        long id;
+        try {
+            id = Long.parseLong(args[2]);
+        } catch (NumberFormatException ex) {
+            p.sendMessage("§c编号无效");
+            return;
+        }
+        FuturesService.PosCloseResult r = futures.closePos(p, id);
+        switch (r) {
+            case SUCCESS -> p.sendMessage("§a已平仓，本息已按当前结算价入账银行");
+            case NOT_FOUND -> p.sendMessage("§c头寸不存在");
+            case NOT_ACTIVE -> p.sendMessage("§c该头寸已结算");
+            case NOT_OWNER -> p.sendMessage("§c这不是你的头寸");
         }
     }
 
@@ -1229,7 +1334,10 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         switch (args[2].toLowerCase()) {
             case "stats" -> sender.sendMessage("§e期货交易所: §a" + futures.countByStatus(FuturesContract.OPEN)
                     + " §7挂单 · §a" + futures.countByStatus(FuturesContract.LOCKED)
-                    + " §7锁定待交割 · §a" + futures.countByStatus(FuturesContract.DELIVERED) + " §7已交割");
+                    + " §7锁定待交割 · §a" + futures.countByStatus(FuturesContract.DELIVERED) + " §7已交割"
+                    + " §7| 头寸 §a" + futures.posCountByStatus(FuturesPosition.OPEN)
+                    + " §7未平 · 清算所 §a" + fmt(bank.balance(Bank.CLEARING))
+                    + " §7· 敞口 §a" + fmt(futures.openExposure()));
             case "deliver", "cancel" -> {
                 if (args.length < 4) {
                     sender.sendMessage("§c用法: /ct fut admin " + args[2] + " <编号>");
@@ -1312,7 +1420,7 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
             return List.of("lux", "bond");
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("fut")) {
-            return List.of("help", "info", "open", "my", "cancel", "admin");
+            return List.of("help", "info", "open", "my", "cancel", "long", "short", "pos", "close", "admin");
         }
         if (args.length == 3 && args[0].equalsIgnoreCase("fut") && args[1].equalsIgnoreCase("admin")) {
             return List.of("stats", "deliver", "cancel");

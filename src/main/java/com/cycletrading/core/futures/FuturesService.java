@@ -33,12 +33,20 @@ public final class FuturesService {
 
     public enum CancelResult { SUCCESS, NOT_FOUND, NOT_ACTIVE, NOT_OWNER, NO_SPACE, ERROR }
 
+    public enum PosOpenResult { SUCCESS, FROZEN, INSUFFICIENT_FUNDS, INVALID_TYPE, INVALID_COMMODITY, NO_ANCHOR, INVALID_QTY, INVALID_TERM, DISABLED }
+
+    public enum PosCloseResult { SUCCESS, NOT_FOUND, NOT_ACTIVE, NOT_OWNER }
+
     public static final long DAY_TICKS = 24000L;
 
     private final CycleTradingPlugin plugin;
     private final ConcurrentHashMap<Long, FuturesContract> contracts = new ConcurrentHashMap<>();
     private final PriorityQueue<FuturesContract> settlement = new PriorityQueue<>(Comparator.comparingLong(c -> c.matureAt));
     private final AtomicLong nextId = new AtomicLong(1);
+
+    private final ConcurrentHashMap<Long, FuturesPosition> positions = new ConcurrentHashMap<>();
+    private final PriorityQueue<FuturesPosition> posQueue = new PriorityQueue<>(Comparator.comparingLong(p -> p.matureAt));
+    private final AtomicLong nextPosId = new AtomicLong(1);
 
     private Bank bank;
 
@@ -50,9 +58,12 @@ public final class FuturesService {
         this.bank = bank;
     }
 
-    /** 启动交割轮询（全局线程，每 20 秒）。 */
+    /** 启动交割/头寸轮询（全局线程，每 20 秒）。 */
     public void start() {
-        plugin.getServer().getGlobalRegionScheduler().runAtFixedRate(plugin, task -> checkSettlement(), 400L, 400L);
+        plugin.getServer().getGlobalRegionScheduler().runAtFixedRate(plugin, task -> {
+            checkSettlement();
+            checkPositions();
+        }, 400L, 400L);
     }
 
     // ---------- 查询 ----------
@@ -380,6 +391,170 @@ public final class FuturesService {
         if (p != null && p.isOnline()) {
             Scheduler.onPlayer(plugin, p, sp -> sp.sendMessage(msg), null);
         }
+    }
+
+    // ---------- 多空头寸（保证金交易） ----------
+
+    /** 品种结算价锚：期货近期成交均价 → 管理员参考价 → null（无锚禁止开仓）。 */
+    public Long anchorOf(String key) {
+        for (com.cycletrading.core.futures.Commodity c : plugin.futuresCommodities()) {
+            if (c.key().equals(key)) {
+                Double avg = plugin.priceHistory().average(c.material());
+                if (avg != null) {
+                    return Math.max(1, Math.round(avg));
+                }
+                long ref = plugin.optionReference(key);
+                return ref > 0 ? ref : null;
+            }
+        }
+        return null;
+    }
+
+    /** 开仓预检（多/空）。 */
+    public PosOpenResult validateOpenPos(Player p, String type, String key, long qty, int termDays) {
+        if (!plugin.futuresEnabled()) {
+            return PosOpenResult.DISABLED;
+        }
+        if (!type.equalsIgnoreCase(FuturesPosition.LONG) && !type.equalsIgnoreCase(FuturesPosition.SHORT)) {
+            return PosOpenResult.INVALID_TYPE;
+        }
+        Long entry = anchorOf(key);
+        if (entry == null) {
+            return PosOpenResult.NO_ANCHOR;
+        }
+        if (qty <= 0) {
+            return PosOpenResult.INVALID_QTY;
+        }
+        if (!plugin.futuresTerms().contains(termDays)) {
+            return PosOpenResult.INVALID_TERM;
+        }
+        String uuid = p.getUniqueId().toString();
+        if (bank.isFrozen(uuid)) {
+            return PosOpenResult.FROZEN;
+        }
+        if (bank.balance(uuid) < entry * qty) {
+            return PosOpenResult.INSUFFICIENT_FUNDS;
+        }
+        return PosOpenResult.SUCCESS;
+    }
+
+    /** 开仓：100% 保证金（入场价×数量）→ 清算所账户。返回头寸；并发扣款失败返回 null。 */
+    public FuturesPosition openPos(Player p, String type, String key, long qty, int termDays) {
+        Long entry = anchorOf(key);
+        long margin = entry * qty;
+        String uuid = p.getUniqueId().toString();
+        if (!bank.debit(uuid, margin, TxEntry.FUT_POS_OPEN)) {
+            return null;
+        }
+        bank.credit(Bank.CLEARING, "CLEARING", margin, TxEntry.FUT_POS_MARGIN);
+        long now = worldTime();
+        long id = nextPosId.getAndIncrement();
+        FuturesPosition pos = new FuturesPosition(id, uuid, p.getName(), type.toUpperCase(), key,
+                entry, qty, margin, termDays, System.currentTimeMillis(), now, now + termDays * DAY_TICKS);
+        positions.put(id, pos);
+        posQueue.add(pos);
+        plugin.storage().requestSave();
+        return pos;
+    }
+
+    /** 提前平仓（按当前锚即时结算）。 */
+    public PosCloseResult closePos(Player p, long id) {
+        String uuid = p.getUniqueId().toString();
+        FuturesPosition pos = positions.get(id);
+        if (pos == null) {
+            return PosCloseResult.NOT_FOUND;
+        }
+        if (!pos.isOpen()) {
+            return PosCloseResult.NOT_ACTIVE;
+        }
+        if (!pos.owner.equals(uuid)) {
+            return PosCloseResult.NOT_OWNER;
+        }
+        posQueue.remove(pos);
+        settlePosition(pos);
+        return PosCloseResult.SUCCESS;
+    }
+
+    private void checkPositions() {
+        long now = worldTime();
+        while (!posQueue.isEmpty() && posQueue.peek().matureAt <= now) {
+            FuturesPosition pos = posQueue.poll();
+            FuturesPosition cur = positions.get(pos.id);
+            if (cur == null || !cur.isOpen()) {
+                continue;
+            }
+            settlePosition(cur);
+        }
+    }
+
+    /** 现金结算：盈亏 clamp 到 ±保证金，保证金退还 + 盈利从清算所支付。 */
+    private void settlePosition(FuturesPosition pos) {
+        Long anchor = anchorOf(pos.commodity);
+        long s = anchor == null ? pos.entry : anchor; // 无锚兜底按入场价（盈亏 0）
+        long raw = pos.isLong() ? (s - pos.entry) * pos.qty : (pos.entry - s) * pos.qty;
+        long pnl = Math.max(-pos.margin, Math.min(pos.margin, raw));
+        long payout = pos.margin + Math.max(0, pnl);
+        pos.settlementPrice = s;
+        pos.pnl = pnl;
+        pos.payout = payout;
+        pos.status = FuturesPosition.SETTLED;
+        pos.settledAt = System.currentTimeMillis();
+        if (payout > 0) {
+            bank.debit(Bank.CLEARING, payout, TxEntry.FUT_POS_SETTLE);
+            bank.credit(pos.owner, pos.name, payout, TxEntry.FUT_POS_RETURN);
+        }
+        notify(pos.owner, "§a期货" + (pos.isLong() ? "多单" : "空单") + " #" + pos.id + " 已结算：结算价 §e" + s
+                + " §a· 盈亏 §e" + (pnl >= 0 ? "+" : "") + pnl + " §a· 实付 §e" + payout + " 绿宝石§a已入银行");
+        plugin.storage().requestSave();
+    }
+
+    public List<FuturesPosition> positionsOf(String uuid) {
+        return positions.values().stream()
+                .filter(p -> p.owner.equals(uuid))
+                .sorted(Comparator.comparingLong((FuturesPosition p) -> p.id).reversed())
+                .toList();
+    }
+
+    public int posCountByStatus(String status) {
+        return (int) positions.values().stream().filter(p -> p.status.equals(status)).count();
+    }
+
+    /** 未平仓保证金合计（清算敞口）。 */
+    public long openExposure() {
+        long sum = 0;
+        for (FuturesPosition p : positions.values()) {
+            if (p.isOpen()) {
+                sum += p.margin;
+            }
+        }
+        return sum;
+    }
+
+    /** 头寸剩余游戏日（向上取整）。 */
+    public long posDaysLeft(FuturesPosition p) {
+        long left = p.matureAt - worldTime();
+        if (left <= 0) {
+            return 0;
+        }
+        return (left + DAY_TICKS - 1) / DAY_TICKS;
+    }
+
+    public List<FuturesPosition> positionsSnapshot() {
+        return new ArrayList<>(positions.values());
+    }
+
+    public void restorePosition(FuturesPosition p) {
+        if (p != null) {
+            positions.put(p.id, p);
+            if (p.isOpen()) {
+                posQueue.add(p);
+            }
+        }
+    }
+
+    public void rebuildPosId() {
+        long max = positions.keySet().stream().mapToLong(Long::longValue).max().orElse(0);
+        nextPosId.set(max + 1);
     }
 
     // ---------- 存档 ----------

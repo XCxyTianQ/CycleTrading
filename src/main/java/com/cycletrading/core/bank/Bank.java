@@ -37,6 +37,9 @@ public final class Bank {
     /** 系统国库账户标识（奢侈品成交款回收池），不计入玩家总存量。 */
     public static final String SYSTEM = "SYSTEM";
 
+    /** 期货清算所账户：多空头寸保证金池（不计入玩家总存量与金条价；可为负 = 国库隐性担保）。 */
+    public static final String CLEARING = "CLEARING";
+
     private final CycleTradingPlugin plugin;
     private final ConcurrentHashMap<String, BankAccount> accounts = new ConcurrentHashMap<>();
     private final CopyOnWriteArrayList<TxEntry> ledger = new CopyOnWriteArrayList<>();
@@ -145,12 +148,13 @@ public final class Bank {
 
     // ---------- 转账 ----------
 
-    /** 虚拟转账（玩家间）。国库账户（SYSTEM）不参与转账。 */
+    /** 虚拟转账（玩家间）。国库（SYSTEM）/清算所（CLEARING）不参与转账。 */
     public synchronized TransferResult send(String fromUuid, String toUuid, String toName, long amount) {
         if (amount <= 0) {
             return TransferResult.INVALID;
         }
-        if (SYSTEM.equals(fromUuid) || SYSTEM.equals(toUuid)) {
+        if (SYSTEM.equals(fromUuid) || SYSTEM.equals(toUuid)
+                || CLEARING.equals(fromUuid) || CLEARING.equals(toUuid)) {
             return TransferResult.INVALID;
         }
         if (fromUuid.equals(toUuid)) {
@@ -221,7 +225,7 @@ public final class Bank {
     // ---------- 后台管理 ----------
 
     public AdminResult adminSet(String uuid, String name, long value) {
-        if (SYSTEM.equals(uuid) || value < 0) {
+        if (SYSTEM.equals(uuid) || CLEARING.equals(uuid) || value < 0) {
             return AdminResult.INVALID;
         }
         if (value > plugin.bankMaxBalance()) {
@@ -241,7 +245,7 @@ public final class Bank {
     }
 
     public AdminResult adminAdd(String uuid, String name, long delta) {
-        if (SYSTEM.equals(uuid) || delta <= 0) {
+        if (SYSTEM.equals(uuid) || CLEARING.equals(uuid) || delta <= 0) {
             return AdminResult.INVALID;
         }
         accounts.compute(uuid, (k, a) -> {
@@ -257,7 +261,7 @@ public final class Bank {
     }
 
     public AdminResult adminRemove(String uuid, String name, long delta) {
-        if (SYSTEM.equals(uuid) || delta <= 0) {
+        if (SYSTEM.equals(uuid) || CLEARING.equals(uuid) || delta <= 0) {
             return AdminResult.INVALID;
         }
         AtomicReference<Boolean> ok = new AtomicReference<>(true);
@@ -281,7 +285,7 @@ public final class Bank {
     }
 
     public AdminResult adminFreeze(String uuid, String name, boolean freeze) {
-        if (SYSTEM.equals(uuid)) {
+        if (SYSTEM.equals(uuid) || CLEARING.equals(uuid)) {
             return AdminResult.INVALID;
         }
         accounts.compute(uuid, (k, a) -> {
@@ -324,11 +328,11 @@ public final class Bank {
         nextTxId.set(max + 1);
     }
 
-    /** 加载存档后重建玩家总存量（不含国库）。 */
+    /** 加载存档后重建玩家总存量（不含国库与清算所）。 */
     public void rebuildSupply() {
         long sum = 0;
         for (BankAccount a : accounts.values()) {
-            if (!SYSTEM.equals(a.owner)) {
+            if (!SYSTEM.equals(a.owner) && !CLEARING.equals(a.owner)) {
                 sum += a.balance;
             }
         }
@@ -360,7 +364,7 @@ public final class Bank {
     }
 
     private void addSupply(String uuid, long delta) {
-        if (!SYSTEM.equals(uuid)) {
+        if (!SYSTEM.equals(uuid) && !CLEARING.equals(uuid)) {
             totalSupply.addAndGet(delta);
         }
     }

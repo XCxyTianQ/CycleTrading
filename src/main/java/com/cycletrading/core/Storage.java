@@ -5,6 +5,7 @@ import com.cycletrading.core.bank.BankAccount;
 import com.cycletrading.core.bank.TxEntry;
 import com.cycletrading.core.bond.Bond;
 import com.cycletrading.core.futures.FuturesContract;
+import com.cycletrading.core.futures.FuturesPosition;
 import com.cycletrading.core.luxury.LuxuryListing;
 import com.cycletrading.core.mailbox.Mailbox;
 import com.cycletrading.core.options.OptionContract;
@@ -60,6 +61,7 @@ public final class Storage {
     /** 期货合约快照。 */
     public static final class FuturesSnapshot {
         public List<FuturesContract> contracts = new ArrayList<>();
+        public List<FuturesPosition> positions = new ArrayList<>();
     }
 
     /** 期权合约快照。 */
@@ -296,10 +298,17 @@ public final class Storage {
                     futures.restore(c);
                 }
             }
+            if (snap.positions != null) {
+                for (FuturesPosition p : snap.positions) {
+                    futures.restorePosition(p);
+                }
+            }
             futures.rebuildNextId();
+            futures.rebuildPosId();
             plugin.getLogger().info("Futures loaded: " + (snap.contracts == null ? 0 : snap.contracts.size())
                     + " contracts, " + futures.countByStatus(FuturesContract.OPEN) + " open, "
-                    + futures.countByStatus(FuturesContract.LOCKED) + " locked");
+                    + futures.countByStatus(FuturesContract.LOCKED) + " locked | "
+                    + futures.posCountByStatus(FuturesPosition.OPEN) + " positions open");
         } catch (Exception e) {
             plugin.getLogger().severe("Failed to load futures data: " + e.getMessage());
             quarantine(futuresFile);
@@ -407,6 +416,7 @@ public final class Storage {
 
         FuturesSnapshot fs = new FuturesSnapshot();
         fs.contracts = new ArrayList<>(futures.snapshot());
+        fs.positions = new ArrayList<>(futures.positionsSnapshot());
         writeJson(futuresFile, fs);
 
         OptionsSnapshot os = new OptionsSnapshot();
