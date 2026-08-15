@@ -2,7 +2,7 @@
 
 以【绿宝石】为唯一通货的 Minecraft 经济/交易插件，运行于 AzureBranches **EXP5Plus**（Folia fork，MC 26.1.2，Java 25）。
 
-## 六大板块
+## 七大板块
 
 | 板块 | 说明 |
 |---|---|
@@ -12,8 +12,9 @@
 | 📬 邮箱 | 只收不存（仅系统投递），储量上限 27，GUI 单件领取 |
 | 📈 定期债券 | 五档定期（3/7/14/30/60 游戏日），利率按总存量加权购买时锁定，退一法取整 |
 | 📦 期货交割市场 | 9 个标准大宗合约，全额保证金零违约，按游戏日到期实物交割 |
+| 🎰 期权市场 | 看涨/看跌、欧式、现金结算；卖方全额保证金；结算价=期货均价→参考价 |
 
-> 死亡保险板块暂缓发布（`insurance.enabled: false`）。
+> 死亡保险板块已于 v1.1.0 移除。
 
 ## 命令入口
 
@@ -24,33 +25,39 @@
 /ct my                    我的挂单          /ct mail / ct collect 邮箱
 /ct bank ...              银行（存取/转账/后台）
 /ct lux ...               奢侈品商店        /ct bond ...          定期债券
-/ct fut ...               期货交割市场      /ct admin reload      重载配置
+/ct fut ...               期货交割市场      /ct opt ...           期权市场
+/ct admin reload          重载配置
 ```
 
 详见 `docs/ARCHITECTURE.md`（架构设计与各模块数据模型）与发布包内 `DEPLOY.md`（部署说明）。
 
-## 期货通俗指南
+## 期货/期权通俗指南
 
-期货就是**大宗整批货的"先订后交"**：
+**期货** = 大宗整批货的"先订后交"：
 
 1. **卖方**把正好一批标准货（如 640 橡木原木）交给系统托管、标好价、约好交货日期（`/ct fut open <价格> <期限>`）
 2. **买方**在 `/ct fut` 市场下单并**先付全款锁定**
 3. 双方都先交全款/全货（**全额保证金**）→ 不会跑单、不会诈骗
 4. **到期自动交割**：货进买方邮箱（`/ct mail` 领取），钱进卖方银行，人不在线也没事
-5. 成交后不能反悔；没卖出去之前卖方可 `/ct fut cancel <编号>` 撤单
 
-游戏内输入 `/ct fut help` 查看同款通俗指南。
+**期权** = 花钱买"将来按约定价交易的权利"（到期只结算钱）：
+
+- 看涨 call：赌到期涨价，涨了赚差价、跌了只亏权利金；看跌 put 反之
+- 卖方交全额保证金兜底，不会赖账；买方最多亏权利金
+- 结算价 = 期货近期成交均价 → 管理员参考价
+
+游戏内输入 `/ct fut help`、`/ct opt help` 查看同款通俗指南。
 
 ## 构建
 
 ```powershell
 .\gradlew.bat build --offline   # 需要 Java 25；依赖 paper-api 26.1.2.build.74-stable（已缓存可离线）
-# 产物: build\libs\cycletrading-folia-1.0.2.jar
+# 产物: build\libs\cycletrading-folia-1.1.0.jar
 ```
 
 ## 部署
 
-1. `cycletrading-folia-1.0.2.jar` 放入服务端 `plugins/`
+1. `cycletrading-folia-1.1.0.jar` 放入服务端 `plugins/`
 2. 启动服务端（AzureBranches EXP5Plus，MC 26.1.2）
 3. `plugins/cycletrading/config.yml` 按需调整，`/ct admin reload` 热重载
 

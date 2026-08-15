@@ -36,7 +36,7 @@ jobs:
           echo "Resolved PKG_VERSION=$PKG_VERSION"
 
       - name: Build
-        run: gradle build --no-daemon -Pversion="${PKG_VERSION}"
+        run: gradle build --no-daemon -PpkgVersion="${PKG_VERSION}"
 
       - name: Assemble release package
         shell: bash

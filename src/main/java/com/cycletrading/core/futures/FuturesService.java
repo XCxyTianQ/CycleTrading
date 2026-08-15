@@ -78,6 +78,13 @@ public final class FuturesService {
                 .toList();
     }
 
+    /** 已交割合约（供期权价格历史重建）。 */
+    public List<FuturesContract> deliveredContracts() {
+        return contracts.values().stream()
+                .filter(c -> FuturesContract.DELIVERED.equals(c.status))
+                .toList();
+    }
+
     public int countByStatus(String status) {
         return (int) contracts.values().stream().filter(c -> c.status.equals(status)).count();
     }
@@ -287,6 +294,8 @@ public final class FuturesService {
         bank.credit(c.seller, c.sellerName, earnings, TxEntry.FUTURES_SELL);
         c.status = FuturesContract.DELIVERED;
         c.deliveredAt = System.currentTimeMillis();
+        // 交割价入库 → 期权结算价来源
+        plugin.priceHistory().record(goods.getType(), c.price);
         notify(c.buyer, "§a期货合约 #" + c.id + " 已交割！商品已入邮箱（/ct mail 领取）");
         notify(c.seller, "§a期货合约 #" + c.id + " 交割完成，货款 §e" + earnings + " 绿宝石§a已入银行"
                 + (taxOf(c.price) > 0 ? "§7（税后）" : ""));

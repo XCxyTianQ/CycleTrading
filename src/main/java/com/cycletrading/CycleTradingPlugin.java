@@ -7,24 +7,26 @@ import com.cycletrading.core.bank.Bank;
 import com.cycletrading.core.bond.BondService;
 import com.cycletrading.core.futures.Commodity;
 import com.cycletrading.core.futures.FuturesService;
-import com.cycletrading.core.insurance.InsuranceListener;
-import com.cycletrading.core.insurance.InsuranceService;
 import com.cycletrading.core.luxury.LuxuryMarket;
 import com.cycletrading.core.mailbox.Mailbox;
+import com.cycletrading.core.options.OptionsService;
+import com.cycletrading.core.options.PriceHistory;
 import com.cycletrading.gui.GuiManager;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.bukkit.Material;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * CycleTrading —— 以绿宝石为唯一通货的玩家间挂单市场。
+ * CycleTrading —— 以绿宝石为唯一通货的经济/交易插件（v1.1）。
  *
  * 目标环境：AzureBranches EXP5Plus（Folia fork，MC 26.1.2，Java 25）。
- * 线程纪律：全部物品/世界操作经 entity/region 线程执行（见 sched.Scheduler 与 gui.GuiManager）。
+ * 线程纪律：全部物品/世界操作经 entity/region 线程执行（见 sched.Scheduler 与 gui.GuiManager）；
+ * 债券到期/期货交割/期权结算在全局线程轮询（纯数据操作）。
  */
 public final class CycleTradingPlugin extends JavaPlugin {
 
@@ -33,10 +35,11 @@ public final class CycleTradingPlugin extends JavaPlugin {
     private Market market;
     private Bank bank;
     private LuxuryMarket luxury;
-    private InsuranceService insurance;
     private Mailbox mailbox;
     private BondService bonds;
     private FuturesService futures;
+    private OptionsService options;
+    private PriceHistory priceHistory;
     private Storage storage;
 
     @Override
@@ -48,27 +51,29 @@ public final class CycleTradingPlugin extends JavaPlugin {
         market = new Market(this);
         bank = new Bank(this);
         luxury = new LuxuryMarket(this);
-        insurance = new InsuranceService(this);
         mailbox = new Mailbox(this);
         bonds = new BondService(this);
         futures = new FuturesService(this);
+        options = new OptionsService(this);
+        priceHistory = new PriceHistory(this);
         market.attachBank(bank);
         luxury.attach(bank);
-        insurance.attachBank(bank);
         bonds.attachBank(bank);
         futures.attachBank(bank);
-        storage.attach(market, bank, luxury, insurance, mailbox, bonds, futures);
+        options.attach(bank, priceHistory);
+        storage.attach(market, bank, luxury, mailbox, bonds, futures, options);
         storage.load();
+        priceHistory.rebuild(futures.deliveredContracts());
         bonds.start();
         futures.start();
+        options.start();
 
         GuiManager guis = new GuiManager(this, market, luxury);
         getServer().getPluginManager().registerEvents(guis, this);
-        getServer().getPluginManager().registerEvents(new InsuranceListener(this, insurance), this);
 
         PluginCommand cmd = getCommand("cycletrading");
         if (cmd != null) {
-            CycleTradingCommand executor = new CycleTradingCommand(this, market, bank, luxury, insurance, bonds, futures, guis);
+            CycleTradingCommand executor = new CycleTradingCommand(this, market, bank, luxury, bonds, futures, options, guis);
             cmd.setExecutor(executor);
             cmd.setTabCompleter(executor);
         }
@@ -80,7 +85,8 @@ public final class CycleTradingPlugin extends JavaPlugin {
                 + " | Bank accounts: " + bank.accountsSnapshot().size()
                 + " | Player supply: " + bank.playerSupply()
                 + " | Bonds: " + bonds.activeCount() + " active (locked " + bonds.totalLocked() + ")"
-                + " | Futures: " + futures.countByStatus("OPEN") + " open, " + futures.countByStatus("LOCKED") + " locked");
+                + " | Futures: " + futures.countByStatus("OPEN") + " open, " + futures.countByStatus("LOCKED") + " locked"
+                + " | Options: " + options.countByStatus("OPEN") + " open, " + options.countByStatus("LOCKED") + " locked");
     }
 
     @Override
@@ -107,10 +113,6 @@ public final class CycleTradingPlugin extends JavaPlugin {
         return luxury;
     }
 
-    public InsuranceService insurance() {
-        return insurance;
-    }
-
     public Mailbox mailbox() {
         return mailbox;
     }
@@ -121,6 +123,14 @@ public final class CycleTradingPlugin extends JavaPlugin {
 
     public FuturesService futures() {
         return futures;
+    }
+
+    public OptionsService options() {
+        return options;
+    }
+
+    public PriceHistory priceHistory() {
+        return priceHistory;
     }
 
     public Storage storage() {
@@ -157,30 +167,6 @@ public final class CycleTradingPlugin extends JavaPlugin {
 
     public long luxuryMaxBasePrice() {
         return getConfig().getLong("luxury.max-base-price", 100000000L);
-    }
-
-    public boolean insuranceEnabled() {
-        return getConfig().getBoolean("insurance.enabled", true);
-    }
-
-    public long insT1Price() {
-        return getConfig().getLong("insurance.t1-price", 10L);
-    }
-
-    public long insT2Price() {
-        return getConfig().getLong("insurance.t2-price", 20L);
-    }
-
-    public long insT3Price() {
-        return getConfig().getLong("insurance.t3-price", 40L);
-    }
-
-    public long insT4Price() {
-        return getConfig().getLong("insurance.t4-price", 64L);
-    }
-
-    public long insT4Compensation() {
-        return getConfig().getLong("insurance.t4-compensation", 10L);
     }
 
     public int mailboxCapacity() {
@@ -236,6 +222,26 @@ public final class CycleTradingPlugin extends JavaPlugin {
         }
         return list.isEmpty() ? defaultCommodities() : list;
     }
+
+    public boolean optionsEnabled() {
+        return getConfig().getBoolean("options.enabled", true);
+    }
+
+    /** 品种参考价（期权结算价兜底锚，config options.reference.<key>）。 */
+    public long optionReference(String key) {
+        return getConfig().getLong("options.reference." + key, DEFAULT_REFERENCE.getOrDefault(key, 0L));
+    }
+
+    private static final Map<String, Long> DEFAULT_REFERENCE = Map.of(
+            "oak_log", 500L,
+            "coal_block", 2000L,
+            "iron_block", 4000L,
+            "gold_block", 8000L,
+            "redstone_block", 6000L,
+            "lapis_block", 9000L,
+            "nether_quartz", 2000L,
+            "diamond_block", 30000L,
+            "netherite_block", 150000L);
 
     private static List<Commodity> defaultCommodities() {
         return List.of(

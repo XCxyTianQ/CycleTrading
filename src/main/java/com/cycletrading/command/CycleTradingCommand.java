@@ -11,9 +11,9 @@ import com.cycletrading.core.bond.BondService;
 import com.cycletrading.core.futures.Commodity;
 import com.cycletrading.core.futures.FuturesContract;
 import com.cycletrading.core.futures.FuturesService;
-import com.cycletrading.core.insurance.InsurancePolicy;
-import com.cycletrading.core.insurance.InsuranceService;
 import com.cycletrading.core.luxury.LuxuryMarket;
+import com.cycletrading.core.options.OptionContract;
+import com.cycletrading.core.options.OptionsService;
 import com.cycletrading.gui.GuiManager;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -35,20 +35,20 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
     private final Market market;
     private final Bank bank;
     private final LuxuryMarket luxury;
-    private final InsuranceService insurance;
     private final BondService bonds;
     private final FuturesService futures;
+    private final OptionsService options;
     private final GuiManager guis;
 
     public CycleTradingCommand(CycleTradingPlugin plugin, Market market, Bank bank, LuxuryMarket luxury,
-            InsuranceService insurance, BondService bonds, FuturesService futures, GuiManager guis) {
+            BondService bonds, FuturesService futures, OptionsService options, GuiManager guis) {
         this.plugin = plugin;
         this.market = market;
         this.bank = bank;
         this.luxury = luxury;
-        this.insurance = insurance;
         this.bonds = bonds;
         this.futures = futures;
+        this.options = options;
         this.guis = guis;
     }
 
@@ -66,9 +66,9 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
             case "mail" -> mailCmd(sender);
             case "bank" -> bankCmd(sender, args);
             case "lux" -> luxCmd(sender, args);
-            case "ins" -> insCmd(sender, args);
             case "bond" -> bondCmd(sender, args);
             case "fut" -> futCmd(sender, args);
+            case "opt" -> optCmd(sender, args);
             case "admin" -> adminCmd(sender, args);
             default -> sender.sendMessage("§c未知子命令，输入 /ct help 查看帮助");
         }
@@ -81,15 +81,13 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         s.sendMessage("§6/ct sell <价格>  §7手持物品上架（价格单位：绿宝石）");
         s.sendMessage("§6/ct my           §7查看并下架自己的挂单");
         s.sendMessage("§6/ct mail         §7邮箱（只收不存，上限 " + plugin.mailbox().capacity() + "，点击领取）");
-        s.sendMessage("§6/ct collect      §7一键领取邮箱 + 保险托管");
+        s.sendMessage("§6/ct collect      §7一键领取邮箱");
         s.sendMessage("§6/ct bank         §7查看银行余额");
         s.sendMessage("§6/ct bank deposit [数量|all]  §7实物绿宝石存入银行");
         s.sendMessage("§6/ct bank withdraw <数量|all> §7从银行提取实物绿宝石");
         s.sendMessage("§6/ct bank send <玩家> <数量>  §7虚拟绿宝石转账");
         s.sendMessage("§6/ct lux [页]    §7奢侈品商店（动态定价，仅管理员挂售）");
         s.sendMessage("§6/ct lux status  §7查看经济总存量与当前倍率");
-        s.sendMessage("§6/ct ins         §7查看死亡保险档位与当前保单");
-        s.sendMessage("§6/ct ins buy <1-4> §7购买死亡保险（死亡时按档位回滚物品）");
         s.sendMessage("§6/ct bond        §7我的定期债券（到期自动结算）");
         s.sendMessage("§6/ct bond info   §7五档利率/期限/最低购买量");
         s.sendMessage("§6/ct bond buy <档位> <金额> §7购买定期债券（仅虚拟余额）");
@@ -97,12 +95,16 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         s.sendMessage("§6/ct fut info    §7标准合约品种与交割期限");
         s.sendMessage("§6/ct fut open <价格> <期限> §7手持标准数量商品开仓");
         s.sendMessage("§6/ct fut my      §7我的期货合约（撤单/交割状态）");
+        s.sendMessage("§6/ct opt [页]    §7期权市场（看涨/看跌，现金结算）");
+        s.sendMessage("§6/ct opt help    §7期权通俗指南");
+        s.sendMessage("§6/ct opt open <call|put> <品种> <行权价> <权利金> <期限> §7开仓卖期权");
+        s.sendMessage("§6/ct opt my      §7我的期权（撤单/到期状态）");
         if (s.hasPermission("cycletrading.admin")) {
             s.sendMessage("§c/ct lux list <基础价>  §7手持珍稀物品挂售（仅管理员）");
             s.sendMessage("§c/ct lux remove <编号> §7下架奢侈品");
-            s.sendMessage("§c/ct ins admin view|set <玩家> [1-4|clear]");
             s.sendMessage("§c/ct bond admin stats|view <玩家>");
             s.sendMessage("§c/ct fut admin stats|deliver <编号>|cancel <编号>");
+            s.sendMessage("§c/ct opt admin stats|settle <编号>|cancel <编号>");
             s.sendMessage("§c/ct bank admin view|set|add|remove|freeze|unfreeze|ledger");
             s.sendMessage("§c/ct admin reload");
         }
@@ -170,24 +172,11 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         }
         Player p = (Player) sender;
         com.cycletrading.core.mailbox.Mailbox.CollectResult r = plugin.mailbox().collect(p);
-        InsuranceService.DeliverResult dr = plugin.insurance().deliverPending(p);
-        StringBuilder msg = new StringBuilder();
-        if (r.items() > 0 || r.emeralds() > 0) {
-            msg.append("§a已领取邮箱: §e").append(r.items()).append(" §a件物品、§e").append(r.emeralds()).append(" §a绿宝石");
-        }
-        if (dr.tier() > 0) {
-            if (msg.length() > 0) {
-                msg.append("  ·  ");
-            }
-            msg.append("§a保险托管回滚 §e").append(dr.restored()).append(" §a件");
-            if (dr.pending() > 0) {
-                msg.append("§c（仍有 ").append(dr.pending()).append(" 件因邮箱满暂存）");
-            }
-        }
-        if (msg.length() == 0) {
-            p.sendMessage("§7邮箱是空的，也没有待领取的保险托管");
+        if (r.items() == 0 && r.emeralds() == 0) {
+            p.sendMessage("§7邮箱是空的");
         } else {
-            p.sendMessage(msg.append("§7（放不下的部分仍保留）").toString());
+            p.sendMessage("§a已领取邮箱: §e" + r.items() + " §a件物品、§e" + r.emeralds() + " §a绿宝石"
+                    + "§7（放不下的部分仍保留）");
         }
     }
 
@@ -512,111 +501,174 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         guis.doLuxRemove(p, id);
     }
 
-    // ---------- 死亡保险 ----------
+    // ---------- 期权市场 ----------
 
-    private void insCmd(CommandSender sender, String[] args) {
+    private void optCmd(CommandSender sender, String[] args) {
         if (args.length < 2) {
-            insStatus(sender);
+            if (requirePlayer(sender)) {
+                guis.openOpt((Player) sender, 0);
+            }
             return;
         }
-        switch (args[1].toLowerCase()) {
-            case "buy" -> insBuy(sender, args);
-            case "admin" -> insAdmin(sender, args);
-            default -> insStatus(sender);
+        String a = args[1];
+        if (a.matches("\\d+")) {
+            if (requirePlayer(sender)) {
+                guis.openOpt((Player) sender, Math.max(0, Integer.parseInt(a) - 1));
+            }
+            return;
+        }
+        switch (a.toLowerCase()) {
+            case "help" -> optHelp(sender);
+            case "info" -> optInfo(sender);
+            case "open" -> optOpen(sender, args);
+            case "my" -> optMy(sender);
+            case "cancel" -> optCancel(sender, args);
+            case "admin" -> optAdmin(sender, args);
+            default -> sender.sendMessage("§c用法: /ct opt [页] | help | info | open <call|put> <品种> <行权价> <权利金> <期限> | my | cancel <编号>");
         }
     }
 
-    private void insStatus(CommandSender sender) {
+    /** 期权通俗指南。 */
+    private void optHelp(CommandSender s) {
+        s.sendMessage("§e===== 期权 · 通俗指南 =====");
+        s.sendMessage("§7期权就是【花钱买一个\"将来按约定价交易的权利\"】：");
+        s.sendMessage("§71. §f看涨call§7：赌到期时该品种会涨价 → 涨了就赚差价，跌了只亏权利金");
+        s.sendMessage("§72. §f看跌put§7：赌到期时会跌价 → 跌了就赚差价，涨了只亏权利金");
+        s.sendMessage("§73. 到期时只结算钱（现金结算），不搬货物");
+        s.sendMessage("§74. 到期结算价 = 期货近期成交均价（无成交则用管理员参考价）");
+        s.sendMessage("§7--- 卖方（开仓） ---");
+        s.sendMessage("§7交全额保证金(行权价)托管 → §6/ct opt open <call|put> <品种> <行权价> <权利金> <期限>");
+        s.sendMessage("§7--- 买方 ---");
+        s.sendMessage("§6/ct opt§7 逛市场 → 点合约付权利金 → 到期自动结算赔付入银行");
+        s.sendMessage("§7--- 规则 ---");
+        s.sendMessage("§7· 买方最多亏权利金；卖方最多赔行权价（保证金兜底，不会赖账）");
+        s.sendMessage("§7· 成交后不可反悔；未成交前卖方可 §6/ct opt cancel <编号>§7 撤单");
+        s.sendMessage("§7· 品种与结算价来源见 §6/ct opt info");
+    }
+
+    private void optInfo(CommandSender s) {
+        if (!plugin.optionsEnabled()) {
+            s.sendMessage("§c期权市场暂未启用");
+            return;
+        }
+        s.sendMessage("§e===== 期权市场 · 标的与结算价（方案A） =====");
+        for (Commodity c : plugin.futuresCommodities()) {
+            Long anchor = options.settlementPrice(c.key());
+            s.sendMessage("§6" + c.key() + "§7: 结算价 §a" + (anchor == null ? "§c无锚（禁止挂卖）" : fmt(anchor))
+                    + " §7（" + options.settlementSource(c.key()) + "）");
+        }
+        s.sendMessage("§7可选期限（游戏日）: " + plugin.futuresTerms());
+        s.sendMessage("§7开仓: /ct opt open <call|put> <品种> <行权价> <权利金> <期限>"
+                + "（开仓需托管保证金=行权价）");
+        s.sendMessage("§7看不懂期权？输入 §6/ct opt help§7 查看通俗指南");
+    }
+
+    private void optOpen(CommandSender sender, String[] args) {
         if (!requirePlayer(sender)) {
             return;
         }
         Player p = (Player) sender;
-        if (!plugin.insuranceEnabled()) {
-            p.sendMessage("§c死亡保险暂未启用");
+        if (args.length < 7) {
+            p.sendMessage("§c用法: /ct opt open <call|put> <品种> <行权价> <权利金> <期限>");
             return;
         }
-        InsurancePolicy pol = insurance.policy(p.getUniqueId().toString());
-        int pending = insurance.pendingCount(p.getUniqueId().toString());
-        p.sendMessage("§e===== 死亡保险 =====");
-        p.sendMessage("§7当前保单: " + (pol == null
-                ? "§c无"
-                : "§a档位" + pol.tier + " §7(死亡时生效，单次有效)"));
-        if (pending > 0) {
-            p.sendMessage("§c待领取托管: " + pending + " 件§7（清理背包/邮箱后 /ct collect）");
+        String type = args[2];
+        String key = args[3];
+        long strike;
+        long premium;
+        int term;
+        try {
+            strike = Long.parseLong(args[4]);
+            premium = Long.parseLong(args[5]);
+            term = Integer.parseInt(args[6]);
+        } catch (NumberFormatException ex) {
+            p.sendMessage("§c行权价/权利金/期限必须是整数");
+            return;
         }
-        p.sendMessage("§6档位1: §a" + fmt(plugin.insT1Price()) + " 绿宝石§7 - 回滚快捷栏(9格)");
-        p.sendMessage("§6档位2: §a" + fmt(plugin.insT2Price()) + " 绿宝石§7 - 回滚快捷栏+第一排(18格)");
-        p.sendMessage("§6档位3: §a" + fmt(plugin.insT3Price()) + " 绿宝石§7 - 回滚全部物品栏+快捷栏(36格)");
-        p.sendMessage("§6档位4: §a" + fmt(plugin.insT4Price()) + " 绿宝石§7 - 完全回滚+补偿 " + fmt(plugin.insT4Compensation()) + " 绿宝石入银行");
-        p.sendMessage("§7购买: /ct ins buy <1-4>  ·  保费从银行余额/背包绿宝石扣除");
+        OptionsService.OpenResult r = options.validateOpen(p, type, key, strike, premium, term);
+        switch (r) {
+            case SUCCESS -> {
+                OptionContract c = options.open(p, type, key, strike, premium, term);
+                if (c == null) {
+                    p.sendMessage("§c开仓失败（余额变化），请重试");
+                } else {
+                    p.sendMessage("§a开仓成功！" + c.type + " #" + c.id + " · " + key + " · 行权价 §e" + fmt(strike)
+                            + " §a· 权利金 §e" + fmt(premium) + " §a· 期限 " + term + " 游戏日"
+                            + "§7（保证金 " + fmt(strike) + " 已托管，未成交前可撤单）");
+                }
+            }
+            case FROZEN -> p.sendMessage("§c账户已被冻结");
+            case INSUFFICIENT_FUNDS -> p.sendMessage("§c银行余额不足以托管保证金（需 " + fmt(strike) + " 绿宝石）");
+            case INVALID_TYPE -> p.sendMessage("§c类型必须是 call（看涨）或 put（看跌）");
+            case INVALID_COMMODITY -> p.sendMessage("§c未知品种，见 /ct opt info");
+            case NO_ANCHOR -> p.sendMessage("§c该品种暂无结算价锚（无期货成交且无参考价），禁止挂卖");
+            case INVALID_STRIKE -> p.sendMessage("§c行权价必须大于 0");
+            case INVALID_PREMIUM -> p.sendMessage("§c权利金必须大于 0");
+            case INVALID_TERM -> p.sendMessage("§c期限必须为（游戏日）: " + plugin.futuresTerms());
+            case DISABLED -> p.sendMessage("§c期权市场暂未启用");
+        }
     }
 
-    private void insBuy(CommandSender sender, String[] args) {
+    private void optMy(CommandSender sender) {
+        if (requirePlayer(sender)) {
+            guis.openOptMy((Player) sender);
+        }
+    }
+
+    private void optCancel(CommandSender sender, String[] args) {
         if (!requirePlayer(sender)) {
             return;
         }
         Player p = (Player) sender;
         if (args.length < 3) {
-            p.sendMessage("§c用法: /ct ins buy <1-4>");
+            p.sendMessage("§c用法: /ct opt cancel <编号>");
             return;
         }
-        int tier;
+        long id;
         try {
-            tier = Integer.parseInt(args[2]);
+            id = Long.parseLong(args[2]);
         } catch (NumberFormatException ex) {
-            p.sendMessage("§c档位必须是 1-4");
+            p.sendMessage("§c编号无效");
             return;
         }
-        InsuranceService.BuyResult r = insurance.buy(p, tier);
+        OptionsService.CancelResult r = options.cancel(p, id);
         switch (r) {
-            case SUCCESS -> p.sendMessage("§a投保成功！档位" + tier + " 保单已生效"
-                    + "（保费 " + fmt(insurance.premiumOf(tier)) + " 绿宝石），死亡时自动回滚");
-            case FROZEN -> p.sendMessage("§c账户已被冻结，无法投保");
-            case INSUFFICIENT_FUNDS -> p.sendMessage("§c绿宝石不足（银行余额 + 背包实物）");
-            case INVALID_TIER -> p.sendMessage("§c档位无效，请输入 1-4");
-            case DISABLED -> p.sendMessage("§c死亡保险暂未启用");
+            case SUCCESS -> p.sendMessage("§a已撤单，保证金已退还银行账户");
+            case NOT_FOUND -> p.sendMessage("§c合约不存在");
+            case NOT_ACTIVE -> p.sendMessage("§c该期权已成交或已撤销，无法撤单");
+            case NOT_OWNER -> p.sendMessage("§c这不是你的合约");
         }
     }
 
-    private void insAdmin(CommandSender sender, String[] args) {
+    private void optAdmin(CommandSender sender, String[] args) {
         if (!sender.hasPermission("cycletrading.admin")) {
             sender.sendMessage("§c权限不足");
             return;
         }
-        if (args.length < 4) {
-            sender.sendMessage("§c用法: /ct ins admin <view|set> <玩家> [1-4|clear]");
+        if (args.length < 3) {
+            sender.sendMessage("§c用法: /ct opt admin <stats|settle|cancel> [编号]");
             return;
         }
-        String name = args[3];
-        UUID target = resolveUuid(name);
-        if (target == null) {
-            sender.sendMessage("§c找不到玩家 " + name);
-            return;
-        }
-        String uuid = target.toString();
-        if (args[2].equalsIgnoreCase("view")) {
-            InsurancePolicy pol = insurance.policy(uuid);
-            sender.sendMessage(pol == null
-                    ? "§7" + name + " 无保单"
-                    : "§e" + name + " §7保单: §a档位" + pol.tier + " §7(保费 " + fmt(pol.premium) + ")");
-        } else if (args[2].equalsIgnoreCase("set")) {
-            if (args.length < 5) {
-                sender.sendMessage("§c用法: /ct ins admin set <玩家> <1-4|clear>");
-                return;
+        switch (args[2].toLowerCase()) {
+            case "stats" -> sender.sendMessage("§e期权市场: §a" + options.countByStatus(OptionContract.OPEN)
+                    + " §7挂单 · §a" + options.countByStatus(OptionContract.LOCKED)
+                    + " §7锁定待结算 · §a" + options.countByStatus(OptionContract.SETTLED) + " §7已结算");
+            case "settle", "cancel" -> {
+                if (args.length < 4) {
+                    sender.sendMessage("§c用法: /ct opt admin " + args[2] + " <编号>");
+                    return;
+                }
+                long id;
+                try {
+                    id = Long.parseLong(args[3]);
+                } catch (NumberFormatException ex) {
+                    sender.sendMessage("§c编号无效");
+                    return;
+                }
+                boolean ok = args[2].equalsIgnoreCase("settle") ? options.adminSettle(id) : options.adminCancel(id);
+                sender.sendMessage(ok ? "§a操作成功" : "§c合约不存在或状态不允许该操作");
             }
-            int tier;
-            try {
-                tier = Integer.parseInt(args[4]);
-            } catch (NumberFormatException ex) {
-                sender.sendMessage("§c档位必须是 1-4（clear 清空保单）");
-                return;
-            }
-            insurance.adminSet(uuid, name, tier);
-            sender.sendMessage(tier <= 0
-                    ? "§a已清除 " + name + " 的保单"
-                    : "§a已为 " + name + " 设置档位" + tier + " 保单");
-        } else {
-            sender.sendMessage("§c用法: /ct ins admin <view|set> <玩家> [1-4|clear]");
+            default -> sender.sendMessage("§c用法: /ct opt admin <stats|settle|cancel> [编号]");
         }
     }
 
@@ -959,7 +1011,7 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return List.of("market", "sell", "my", "collect", "mail", "bank", "lux", "ins", "bond", "fut", "help");
+            return List.of("market", "sell", "my", "collect", "mail", "bank", "lux", "bond", "fut", "opt", "help");
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("fut")) {
             return List.of("help", "info", "open", "my", "cancel", "admin");
@@ -985,14 +1037,14 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         if (args.length == 2 && args[0].equalsIgnoreCase("lux")) {
             return List.of("status", "list", "remove");
         }
-        if (args.length == 2 && args[0].equalsIgnoreCase("ins")) {
-            return List.of("buy", "admin");
+        if (args.length == 2 && args[0].equalsIgnoreCase("opt")) {
+            return List.of("help", "info", "open", "my", "cancel", "admin");
         }
-        if (args.length == 3 && args[0].equalsIgnoreCase("ins") && args[1].equalsIgnoreCase("buy")) {
-            return List.of("1", "2", "3", "4");
+        if (args.length == 3 && args[0].equalsIgnoreCase("opt") && args[1].equalsIgnoreCase("open")) {
+            return List.of("call", "put");
         }
-        if (args.length == 3 && args[0].equalsIgnoreCase("ins") && args[1].equalsIgnoreCase("admin")) {
-            return List.of("view", "set");
+        if (args.length == 3 && args[0].equalsIgnoreCase("opt") && args[1].equalsIgnoreCase("admin")) {
+            return List.of("stats", "settle", "cancel");
         }
         return List.of();
     }

@@ -5,10 +5,9 @@ import com.cycletrading.core.bank.BankAccount;
 import com.cycletrading.core.bank.TxEntry;
 import com.cycletrading.core.bond.Bond;
 import com.cycletrading.core.futures.FuturesContract;
-import com.cycletrading.core.insurance.DeathStash;
-import com.cycletrading.core.insurance.InsurancePolicy;
 import com.cycletrading.core.luxury.LuxuryListing;
 import com.cycletrading.core.mailbox.Mailbox;
+import com.cycletrading.core.options.OptionContract;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import java.io.IOException;
@@ -44,11 +43,7 @@ public final class Storage {
         public List<LuxuryListing> listings = new ArrayList<>();
     }
 
-    /** 死亡保险快照（保单 + 待还原托管）。 */
-    public static final class InsuranceSnapshot {
-        public List<InsurancePolicy> policies = new ArrayList<>();
-        public List<DeathStash> stashes = new ArrayList<>();
-    }
+    /** 死亡保险已移除（v1.1）；旧 insurance.json 文件将被忽略。 */
 
     /** 邮箱快照。 */
     public static final class MailboxSnapshot {
@@ -65,14 +60,19 @@ public final class Storage {
         public List<FuturesContract> contracts = new ArrayList<>();
     }
 
+    /** 期权合约快照。 */
+    public static final class OptionsSnapshot {
+        public List<OptionContract> contracts = new ArrayList<>();
+    }
+
     private final CycleTradingPlugin plugin;
     private final Path marketFile;
     private final Path bankFile;
     private final Path luxuryFile;
-    private final Path insuranceFile;
     private final Path mailboxFile;
     private final Path bondFile;
     private final Path futuresFile;
+    private final Path optionsFile;
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
     private final ExecutorService io = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "cycletrading-io");
@@ -83,35 +83,35 @@ public final class Storage {
     private volatile Market market;
     private volatile com.cycletrading.core.bank.Bank bank;
     private volatile com.cycletrading.core.luxury.LuxuryMarket luxury;
-    private volatile com.cycletrading.core.insurance.InsuranceService insurance;
     private volatile Mailbox mailbox;
     private volatile com.cycletrading.core.bond.BondService bonds;
     private volatile com.cycletrading.core.futures.FuturesService futures;
+    private volatile com.cycletrading.core.options.OptionsService options;
 
     public Storage(CycleTradingPlugin plugin, Path dataDir) {
         this.plugin = plugin;
         this.marketFile = dataDir.resolve("market.json");
         this.bankFile = dataDir.resolve("bank.json");
         this.luxuryFile = dataDir.resolve("luxury.json");
-        this.insuranceFile = dataDir.resolve("insurance.json");
         this.mailboxFile = dataDir.resolve("mailbox.json");
         this.bondFile = dataDir.resolve("bonds.json");
         this.futuresFile = dataDir.resolve("futures.json");
+        this.optionsFile = dataDir.resolve("options.json");
     }
 
     public void attach(Market market, com.cycletrading.core.bank.Bank bank,
             com.cycletrading.core.luxury.LuxuryMarket luxury,
-            com.cycletrading.core.insurance.InsuranceService insurance,
             Mailbox mailbox,
             com.cycletrading.core.bond.BondService bonds,
-            com.cycletrading.core.futures.FuturesService futures) {
+            com.cycletrading.core.futures.FuturesService futures,
+            com.cycletrading.core.options.OptionsService options) {
         this.market = market;
         this.bank = bank;
         this.luxury = luxury;
-        this.insurance = insurance;
         this.mailbox = mailbox;
         this.bonds = bonds;
         this.futures = futures;
+        this.options = options;
     }
 
     /** 启动时加载存档。文件不存在或损坏时从空状态开始（损坏文件保留 .corrupt 备份）。 */
@@ -119,10 +119,10 @@ public final class Storage {
         loadMarket();
         loadBank();
         loadLuxury();
-        loadInsurance();
         loadMailbox();
         loadBonds();
         loadFutures();
+        loadOptions();
     }
 
     private void loadMarket() {
@@ -210,34 +210,6 @@ public final class Storage {
         }
     }
 
-    private void loadInsurance() {
-        if (!Files.exists(insuranceFile)) {
-            return;
-        }
-        try {
-            String raw = Files.readString(insuranceFile);
-            InsuranceSnapshot snap = gson.fromJson(raw, InsuranceSnapshot.class);
-            if (snap == null) {
-                return;
-            }
-            if (snap.policies != null) {
-                for (InsurancePolicy p : snap.policies) {
-                    insurance.restorePolicy(p);
-                }
-            }
-            if (snap.stashes != null) {
-                for (DeathStash s : snap.stashes) {
-                    insurance.restoreStash(s);
-                }
-            }
-            plugin.getLogger().info("Insurance loaded: " + (snap.policies == null ? 0 : snap.policies.size())
-                    + " policies, " + (snap.stashes == null ? 0 : snap.stashes.size()) + " death stashes");
-        } catch (Exception e) {
-            plugin.getLogger().severe("Failed to load insurance data: " + e.getMessage());
-            quarantine(insuranceFile);
-        }
-    }
-
     private void loadMailbox() {
         if (!Files.exists(mailboxFile)) {
             return;
@@ -309,6 +281,31 @@ public final class Storage {
         }
     }
 
+    private void loadOptions() {
+        if (!Files.exists(optionsFile)) {
+            return;
+        }
+        try {
+            String raw = Files.readString(optionsFile);
+            OptionsSnapshot snap = gson.fromJson(raw, OptionsSnapshot.class);
+            if (snap == null) {
+                return;
+            }
+            if (snap.contracts != null) {
+                for (OptionContract c : snap.contracts) {
+                    options.restore(c);
+                }
+            }
+            options.rebuildNextId();
+            plugin.getLogger().info("Options loaded: " + (snap.contracts == null ? 0 : snap.contracts.size())
+                    + " contracts, " + options.countByStatus(OptionContract.OPEN) + " open, "
+                    + options.countByStatus(OptionContract.LOCKED) + " locked");
+        } catch (Exception e) {
+            plugin.getLogger().severe("Failed to load options data: " + e.getMessage());
+            quarantine(optionsFile);
+        }
+    }
+
     private void quarantine(Path file) {
         try {
             Files.move(file, file.resolveSibling(file.getFileName().toString() + ".corrupt-" + System.currentTimeMillis()),
@@ -340,11 +337,6 @@ public final class Storage {
         ls.listings = new ArrayList<>(luxury.snapshot());
         writeJson(luxuryFile, ls);
 
-        InsuranceSnapshot is = new InsuranceSnapshot();
-        is.policies = new ArrayList<>(insurance.policiesSnapshot());
-        is.stashes = new ArrayList<>(insurance.stashesSnapshot());
-        writeJson(insuranceFile, is);
-
         MailboxSnapshot mbs = new MailboxSnapshot();
         mbs.entries = new ArrayList<>(mailbox.snapshot());
         writeJson(mailboxFile, mbs);
@@ -356,6 +348,10 @@ public final class Storage {
         FuturesSnapshot fs = new FuturesSnapshot();
         fs.contracts = new ArrayList<>(futures.snapshot());
         writeJson(futuresFile, fs);
+
+        OptionsSnapshot os = new OptionsSnapshot();
+        os.contracts = new ArrayList<>(options.snapshot());
+        writeJson(optionsFile, os);
     }
 
     private void writeJson(Path file, Object obj) {

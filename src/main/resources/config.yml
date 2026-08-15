@@ -24,16 +24,6 @@ luxury:
   # 管理员基础定价上限（绿宝石）
   max-base-price: 100000000
 
-# 死亡保险（定档投保；配合关闭死亡不掉落使用；保费统一由管理员在此规定）
-# 注意：保险板块暂缓发布，默认关闭；启用后死亡回滚按档位生效
-insurance:
-  enabled: false
-  t1-price: 10        # 档位1：仅回滚快捷栏
-  t2-price: 20        # 档位2：回滚快捷栏 + 第一排
-  t3-price: 40        # 档位3：回滚全部物品栏 + 快捷栏
-  t4-price: 64        # 档位4：完全回滚（含盔甲/副手）+ 补偿
-  t4-compensation: 10 # 档位4 补偿额（绿宝石，存入虚拟账户）
-
 # 邮箱（只收不存：仅系统投递，玩家无法存入物品）
 mailbox:
   capacity: 27        # 每玩家储量上限（条）
@@ -91,3 +81,17 @@ futures:
     netherite_block:
       material: NETHERITE_BLOCK
       amount: 64
+
+# 期权市场（欧式、现金结算；卖方全额保证金；结算价 = 期货近期均价 → 参考价 → 无锚禁挂）
+options:
+  enabled: true
+  reference:                 # 各品种参考价（结算价兜底锚，绿宝石/整批合约）
+    oak_log: 500
+    coal_block: 2000
+    iron_block: 4000
+    gold_block: 8000
+    redstone_block: 6000
+    lapis_block: 9000
+    nether_quartz: 2000
+    diamond_block: 30000
+    netherite_block: 150000

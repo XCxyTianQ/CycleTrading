@@ -1,12 +1,12 @@
-# CycleTrading v1.0.1 部署说明（修补版）
+# CycleTrading v1.1.0 部署说明
 
 以【绿宝石】为唯一通货的 Minecraft 经济/交易插件（AzureBranches EXP5Plus / Folia，MC 26.1.2，Java 25）。
 
 ## 包内容
 
 ```
-cycletrading-1.0.0/
-├── cycletrading-folia-1.0.0.jar   插件本体
+cycletrading-1.1.0/
+├── cycletrading-folia-1.1.0.jar   插件本体
 ├── config.yml                     默认配置（首次启动自动生成到 plugins/cycletrading/）
 └── DEPLOY.md                      本说明
 ```
@@ -19,11 +19,11 @@ cycletrading-1.0.0/
 
 ## 安装
 
-1. 将 `cycletrading-folia-1.0.0.jar` 放入服务端 `plugins/` 目录
-2. 启动服务端（确认日志出现 `CycleTrading v1.0.0 enabled`）
+1. 将 `cycletrading-folia-1.1.0.jar` 放入服务端 `plugins/` 目录
+2. 启动服务端（确认日志出现 `CycleTrading v1.1.0 enabled`）
 3. 如需调整配置：编辑 `plugins/cycletrading/config.yml` 后执行 `/ct admin reload`（控制台或 OP）
 
-## 已启用板块（六大板块）
+## 已启用板块（七大板块）
 
 | 板块 | 说明 | 入口 |
 |---|---|---|
@@ -33,8 +33,9 @@ cycletrading-1.0.0/
 | **邮箱** | 只收不存（仅系统投递），每玩家储量上限 27；GUI 单件领取 | `/ct mail` `/ct collect` |
 | **定期债券** | 五档定期（3/7/14/30/60 游戏日）；利率=基础×总存量倍率购买时锁定；退一法取整；本金锁死仅虚拟 | `/ct bond ...` |
 | **期货交割市场** | 9 个标准大宗合约；全额保证金零违约；按游戏日到期实物交割入买方邮箱 | `/ct fut ...` |
+| **期权市场** | 看涨/看跌、欧式、现金结算；卖方全额保证金；结算价=期货近期均价→管理员参考价 | `/ct opt ...` |
 
-> 死亡保险板块**暂缓发布**（`insurance.enabled: false`，代码保留）。开启前请先完成真机回归测试。
+> 死亡保险板块已于 v1.1.0 移除（旧 `data/insurance.json` 可手动删除）。
 
 ## 命令速查
 
@@ -60,9 +61,16 @@ cycletrading-1.0.0/
 /ct fut open <价格> <期限>    手持标准数量商品开仓
 /ct fut my                  我的期货合约（撤单/交割状态）
 /ct fut cancel <编号>        撤单（仅未成交）
+/ct opt [页]                期权市场 GUI（看涨/看跌）
+/ct opt help                期权通俗指南
+/ct opt info                标的品种与结算价来源
+/ct opt open <call|put> <品种> <行权价> <权利金> <期限>  开仓卖期权
+/ct opt my                  我的期权（撤单/到期状态）
+/ct opt cancel <编号>        撤单（仅未成交）
 /ct bank admin view|set|add|remove|freeze|unfreeze|ledger  后台管理（仅管理员）
 /ct bond admin stats|view   债券管理（仅管理员）
 /ct fut admin stats|deliver|cancel  期货管理（仅管理员）
+/ct opt admin stats|settle|cancel  期权管理（仅管理员）
 /ct admin reload            重载配置（仅管理员）
 ```
 
@@ -83,11 +91,6 @@ luxury:
   supply-anchor: 1000000     # 定价锚点：总存量=锚点时倍率=2
   max-multiplier: 100.0      # 倍率上限
   max-base-price: 100000000  # 管理员基础定价上限
-
-insurance:
-  enabled: false             # 保险板块暂缓，默认关闭
-  t1-price: 10 / t2-price: 20 / t3-price: 40 / t4-price: 64
-  t4-compensation: 10
 
 mailbox:
   capacity: 27               # 邮箱储量上限（条/玩家）
@@ -115,6 +118,13 @@ futures:
     nether_quartz: { material: QUARTZ, amount: 64 }
     diamond_block: { material: DIAMOND_BLOCK, amount: 64 }
     netherite_block: { material: NETHERITE_BLOCK, amount: 64 }
+
+options:
+  enabled: true
+  reference:                 # 各品种参考价（结算价兜底锚，绿宝石/整批合约）
+    oak_log: 500 / coal_block: 2000 / iron_block: 4000 / gold_block: 8000
+    redstone_block: 6000 / lapis_block: 9000 / nether_quartz: 2000
+    diamond_block: 30000 / netherite_block: 150000
 ```
 
 ## 数据文件（plugins/cycletrading/data/，JSON）
@@ -127,13 +137,15 @@ futures:
 | `mailbox.json` | 邮箱条目 |
 | `bonds.json` | 定期债券 |
 | `futures.json` | 期货合约（托管商品） |
-| `insurance.json` | 保单 + 死亡托管（保险板块数据） |
+| `options.json` | 期权合约 |
+| `insurance.json` | （已废弃，v1.1.0 起不再使用，可删除） |
 
 - 每次变更异步原子落盘（tmp + 原子替换），停服时 flush；损坏存档自动改名 `.corrupt-<时间戳>` 保留
 - **备份建议**：定期备份整个 `plugins/cycletrading/` 目录
 
 ## 已知事项
 
-- 经济模型：卖家收益/奢侈品成交款/保费/期货货款全部走银行虚拟余额；奢侈品、保费与债券本金构成国库与流动性回收池
-- Folia 线程纪律已内置：跨玩家结算经 entity 线程投递，离线自动走邮箱；期货交割/债券到期在全局线程轮询（纯数据操作）
-- 待补：真实玩家客户端的全流程 E2E 回归（买卖/存取/满箱边界/债券到期/期货交割）；保险板块修复后另行发布
+- 经济模型：卖家收益/奢侈品成交款/期货货款/期权赔付全部走银行虚拟余额；奢侈品、保费与债券本金构成国库与流动性回收池
+- Folia 线程纪律已内置：跨玩家结算经 entity 线程投递，离线自动走邮箱；期货交割/债券到期/期权结算在全局线程轮询（纯数据操作）
+- 期权结算价（方案A）：期货近期成交均价 → 管理员参考价（config options.reference）→ 无锚禁止挂卖
+- 待补：真实玩家客户端的全流程 E2E 回归（买卖/存取/满箱边界/债券到期/期货交割/期权到期）

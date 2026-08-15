@@ -1,7 +1,7 @@
-# CycleTrading 架构设计 · 市场 · 银行 · 奢侈品商店 · 死亡保险 · 邮箱 · 定期债券 · 期货交割
+# CycleTrading 架构设计 · 市场 · 银行 · 奢侈品商店 · 邮箱 · 定期债券 · 期货交割 · 期权
 
 > 目标环境：AzureBranches EXP5Plus（Folia fork，MC 26.1.2，Java 25）
-> 当前版本：**v1.0.1（修补版）** · 六大板块发布；死亡保险暂缓（默认关闭）
+> 当前版本：**v1.1.0** · 七大板块；死亡保险已于 v1.1.0 移除
 
 ## 1. 设计原则
 
@@ -188,7 +188,10 @@ GUI 中每件商品显示：基础定价、当前成交价、当前倍率、挂�
 }]}
 ```
 
-## 9. 模块四：定档死亡保险
+## 9. 模块四：定档死亡保险（已于 v1.1.0 移除）
+
+> **已删除**（v1.1.0）：代码、命令、配置、存档处理全部移除；旧 `insurance.json` 可手动删除。
+> 移除原因：冗余；该 fork 的死亡掉落/保留机制与保险回滚存在兼容性风险（详见发布记录 v0.1.0）。
 
 **定位**：服务器关闭死亡不掉落后，玩家提前用绿宝石购买定档保单，死亡时按档位回滚物品。保费统一由管理员在 `config.yml` 规定，构成经济闭环：**保费 → 国库（回收）；档位 4 补偿 ← 国库（出账）**。
 
@@ -388,7 +391,45 @@ GUI 中每件商品显示：基础定价、当前成交价、当前倍率、挂�
 }]}
 ```
 
-## 14. 发布记录
+## 14. 模块八：期权市场（v1.1.0）
+
+**定位**：标准期权原则的游戏化落地——欧式、现金结算、卖方全额保证金。
+
+- **类型**：看涨 CALL / 看跌 PUT；标的 = 期货 9 个标准大宗品种（单位 = 整批合约）；
+- **现金结算**（到期只结算钱，不动实物）：
+  - CALL 赔付 = `min(max(0, S-K), K)`（封顶 = 行权价）；PUT 赔付 = `max(0, K-S)`；
+- **权利金**：卖方定价，买方成交时付给卖方（买方只有权利、无义务，最多亏权利金）；
+- **全额保证金**：卖方开仓即托管 K（最大赔付上限），到期赔付后余额退还 → 零违约；
+- **结算价（方案A）**：期货近期成交均价（每品种保留最近 10 笔，期货交割时自动入库）
+  → 管理员参考价（config `options.reference`）→ **无锚禁止挂卖**；
+- 到期由全局线程每 20 秒轮询结算（纯数据，Folia 安全）；停服期间顺延，重启补结；
+- 流水类型：`OPTION_OPEN / OPTION_PREMIUM / OPTION_PREMIUM_IN / OPTION_PAYOUT / OPTION_MARGIN_RETURN / OPTION_REFUND`。
+
+**命令**：`/ct opt [页]`（市场 GUI）、`/ct opt help`（通俗指南）、`/ct opt info`（结算价与来源）、
+`/ct opt open <call|put> <品种> <行权价> <权利金> <期限>`、`/ct opt my`、`/ct opt cancel <编号>`、
+`/ct opt admin stats|settle|cancel`（管理员）。
+
+**数据模型**（`plugins/cycletrading/data/options.json`）：
+
+```jsonc
+{ "contracts": [{
+  "id": 1, "seller": "uuid", "sellerName": "…", "buyer": null, "buyerName": null,
+  "type": "CALL", "commodity": "oak_log",
+  "strike": 800, "premium": 50, "termDays": 3,
+  "createdAt": 1786740786611, "lockedAt": 0, "matureAt": 0,
+  "status": "OPEN",            // OPEN | LOCKED | SETTLED | WITHDRAWN | CANCELLED
+  "settlementPrice": 0, "payout": 0, "settledAt": 0
+}]}
+```
+
+## 15. 发布记录
+
+### v1.1.0（2026-08-15）—— 期权 + 保险移除
+
+- 新增：期权市场（欧式/现金结算/全额保证金/方案A结算价）
+- 移除：死亡保险板块（代码/命令/配置/存档处理全部删除，旧 `insurance.json` 可手动清理）
+- 期货联动：交割成交价自动入库 → 期权结算价来源
+- 发布方式：**GitHub Actions 自动构建 + 打 tag 自动发布**（`.github/workflows/build-release.yml`）
 
 ### v1.0.0（2026-08-15）—— 首个正式版
 

@@ -12,6 +12,8 @@ import com.cycletrading.core.futures.FuturesService;
 import com.cycletrading.core.luxury.LuxuryListing;
 import com.cycletrading.core.luxury.LuxuryMarket;
 import com.cycletrading.core.mailbox.Mailbox;
+import com.cycletrading.core.options.OptionContract;
+import com.cycletrading.core.options.OptionsService;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -35,7 +37,7 @@ public final class GuiManager implements Listener {
     /** "我的挂单" 每页挂单数（4 行 × 11 列? 不，44 格 = 4 行 + 8）。 */
     private static final int MY_SIZE = 44;
 
-    public enum Type { MARKET, MY, CONFIRM, LUX, LUX_CONFIRM, MAIL, BOND, FUT, FUT_CONFIRM, FUT_MY }
+    public enum Type { MARKET, MY, CONFIRM, LUX, LUX_CONFIRM, MAIL, BOND, FUT, FUT_CONFIRM, FUT_MY, OPT, OPT_CONFIRM, OPT_MY }
 
     /** GUI 持有者：区分界面类型并携带上下文（页码 / 挂单 id）。 */
     public static final class GuiHolder implements InventoryHolder {
@@ -278,6 +280,38 @@ public final class GuiManager implements Listener {
                     List<FuturesContract> mine = plugin.futures().ofSeller(p.getUniqueId().toString());
                     if (slot < mine.size() && mine.get(slot).isOpen()) {
                         doFutCancel(p, mine.get(slot).id);
+                    }
+                } else if (slot == 53) {
+                    p.closeInventory();
+                }
+            }
+            case OPT -> {
+                if (slot < PAGE_SIZE) {
+                    List<OptionContract> act = plugin.options().openNewestFirst();
+                    int idx = h.page * PAGE_SIZE + slot;
+                    if (idx < act.size()) {
+                        openOptConfirm(p, act.get(idx));
+                    }
+                } else if (slot == 45) {
+                    openOpt(p, h.page - 1);
+                } else if (slot == 53) {
+                    openOpt(p, h.page + 1);
+                } else if (slot == 52) {
+                    p.closeInventory();
+                }
+            }
+            case OPT_CONFIRM -> {
+                if (slot == 4) {
+                    doOptBuy(p, h.listingId);
+                } else if (slot == 6) {
+                    openOpt(p, 0);
+                }
+            }
+            case OPT_MY -> {
+                if (slot < 26) {
+                    List<OptionContract> mine = plugin.options().ofSeller(p.getUniqueId().toString());
+                    if (slot < mine.size() && mine.get(slot).isOpen()) {
+                        doOptCancel(p, mine.get(slot).id);
                     }
                 } else if (slot == 53) {
                     p.closeInventory();
@@ -598,6 +632,157 @@ public final class GuiManager implements Listener {
             case NOT_OWNER -> p.sendMessage("§c这不是你的合约");
             case NO_SPACE -> p.sendMessage("§c背包与邮箱均无空间，无法撤单（请先清理）");
             case ERROR -> p.sendMessage("§c撤单失败，请稍后再试");
+        }
+    }
+
+    // ---------- 期权市场 ----------
+
+    private Material optMaterial(String key) {
+        for (var c : plugin.futuresCommodities()) {
+            if (c.key().equals(key)) {
+                return c.material();
+            }
+        }
+        return Material.PAPER;
+    }
+
+    public void openOpt(Player p, int page) {
+        List<OptionContract> act = plugin.options().openNewestFirst();
+        int total = act.size();
+        int maxPage = Math.max(0, (total - 1) / PAGE_SIZE);
+        if (page < 0) {
+            page = 0;
+        }
+        if (page > maxPage) {
+            page = maxPage;
+        }
+        GuiHolder h = new GuiHolder(Type.OPT,
+                "§8期权市场 §7· 第 " + (page + 1) + "/" + (maxPage + 1) + " 页", 54);
+        h.page = page;
+        int from = page * PAGE_SIZE;
+        for (int i = 0; i < PAGE_SIZE && from + i < total; i++) {
+            OptionContract c = act.get(from + i);
+            h.getInventory().setItem(i, optDisplay(c, "§7点击查看并买入"));
+        }
+        h.getInventory().setItem(45, button(Material.ARROW, "§a上一页"));
+        h.getInventory().setItem(49, button(Material.EXPERIENCE_BOTTLE, "§6期权市场",
+                "§7在售期权: " + total,
+                "§7现金结算 · 卖方全额保证金",
+                "§7通俗指南: /ct opt help"));
+        h.getInventory().setItem(52, button(Material.BARRIER, "§c关闭"));
+        h.getInventory().setItem(53, button(Material.ARROW, "§a下一页"));
+        p.openInventory(h.getInventory());
+    }
+
+    public void openOptConfirm(Player p, OptionContract c) {
+        GuiHolder h = new GuiHolder(Type.OPT_CONFIRM, "§8确认买入期权", 9);
+        h.listingId = c.id;
+        h.getInventory().setItem(2, optDisplay(c, "§7卖家: §f" + c.sellerName));
+        h.getInventory().setItem(4, button(Material.EXPERIENCE_BOTTLE, "§a确认买入",
+                "§7支付权利金: " + fmt(c.premium) + " 绿宝石",
+                "§7到期: " + c.termDays + " 游戏日后按结算价赔付",
+                "§7最大赔付: " + fmt(c.strike) + " 绿宝石",
+                "§7银行余额: §a" + fmt(plugin.bank().balance(p.getUniqueId().toString())),
+                "§7背包实物: §a" + fmt(Items.currencyCount(p))));
+        h.getInventory().setItem(6, button(Material.BARRIER, "§c取消", "§7返回市场"));
+        p.openInventory(h.getInventory());
+    }
+
+    public void openOptMy(Player p) {
+        String uuid = p.getUniqueId().toString();
+        List<OptionContract> mine = plugin.options().ofSeller(uuid);
+        List<OptionContract> bought = plugin.options().ofBuyer(uuid);
+        GuiHolder h = new GuiHolder(Type.OPT_MY,
+                "§8我的期权 §7· 卖出 " + mine.size() + " 笔 · 买入 " + bought.size() + " 笔", 54);
+        int i = 0;
+        for (OptionContract c : mine) {
+            if (i >= 26) {
+                break;
+            }
+            h.getInventory().setItem(i++, optDisplay(c,
+                    c.isOpen() ? "§7点击撤单取回保证金" : "§7" + optStatusText(c)));
+        }
+        for (OptionContract c : bought) {
+            if (i >= 52) {
+                break;
+            }
+            h.getInventory().setItem(i++, optDisplay(c, "§7" + optStatusText(c)));
+        }
+        h.getInventory().setItem(53, button(Material.BARRIER, "§c关闭"));
+        p.openInventory(h.getInventory());
+    }
+
+    private String optStatusText(OptionContract c) {
+        return switch (c.status) {
+            case OptionContract.OPEN -> "§a挂单中（未成交）";
+            case OptionContract.LOCKED -> "§e已成交锁定，剩余 " + plugin.options().daysLeft(c) + " 游戏日到期";
+            case OptionContract.SETTLED -> "§a已结算：结算价 " + fmt(c.settlementPrice) + " · 赔付 " + fmt(c.payout);
+            case OptionContract.WITHDRAWN -> "§7已撤单";
+            case OptionContract.CANCELLED -> "§c已撤销";
+            default -> c.status;
+        };
+    }
+
+    private ItemStack optDisplay(OptionContract c, String... extraLore) {
+        ItemStack it = new ItemStack(optMaterial(c.commodity));
+        ItemMeta meta = it.getItemMeta();
+        meta.setDisplayName("§6" + (c.isCall() ? "看涨 CALL" : "看跌 PUT") + " #" + c.id);
+        List<String> lore = new ArrayList<>();
+        lore.add("§7标的: §f" + c.commodity);
+        lore.add("§7行权价: §a" + fmt(c.strike) + " 绿宝石");
+        lore.add("§7权利金: §a" + fmt(c.premium) + " 绿宝石");
+        lore.add("§7期限: §a" + c.termDays + " §7游戏日");
+        Long anchor = plugin.options().settlementPrice(c.commodity);
+        lore.add("§7当前结算价: §a" + (anchor == null ? "?" : fmt(anchor)) + " §7("
+                + plugin.options().settlementSource(c.commodity) + ")");
+        lore.add("§7卖家: §f" + c.sellerName);
+        for (String s : extraLore) {
+            lore.add(s);
+        }
+        meta.setLore(lore);
+        it.setItemMeta(meta);
+        return it;
+    }
+
+    private void doOptBuy(Player p, long listingId) {
+        OptionsService.BuyResult r = plugin.options().validateBuy(p, listingId);
+        switch (r) {
+            case SUCCESS -> {
+                OptionContract c = plugin.options().buy(p, listingId);
+                if (c == null) {
+                    p.sendMessage("§c交易失败（余额变化或已被抢），请重试");
+                } else {
+                    p.closeInventory();
+                    p.sendMessage("§a买入成功！" + (c.isCall() ? "看涨" : "看跌") + " #" + c.id
+                            + " · 权利金 " + fmt(c.premium) + " 绿宝石已支付"
+                            + "，到期按结算价自动赔付入银行");
+                }
+            }
+            case NOT_FOUND -> p.sendMessage("§c合约不存在");
+            case NOT_ACTIVE -> {
+                p.closeInventory();
+                p.sendMessage("§c该期权已被买入或撤销");
+            }
+            case SELF_PURCHASE -> p.sendMessage("§c不能买入自己的期权");
+            case INSUFFICIENT_FUNDS -> p.sendMessage("§c绿宝石不足（银行余额 + 背包实物）");
+            case FROZEN -> p.sendMessage("§c你的银行账户已被冻结");
+            case ERROR -> p.sendMessage("§c交易失败，请稍后再试");
+        }
+    }
+
+    private void doOptCancel(Player p, long listingId) {
+        OptionsService.CancelResult r = plugin.options().cancel(p, listingId);
+        switch (r) {
+            case SUCCESS -> {
+                p.sendMessage("§a已撤单，保证金已退还银行账户");
+                openOptMy(p);
+            }
+            case NOT_FOUND -> p.sendMessage("§c合约不存在");
+            case NOT_ACTIVE -> {
+                p.sendMessage("§c该期权已成交，无法撤单");
+                openOptMy(p);
+            }
+            case NOT_OWNER -> p.sendMessage("§c这不是你的合约");
         }
     }
 
