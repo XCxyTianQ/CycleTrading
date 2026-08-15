@@ -187,6 +187,9 @@ public final class Market {
             Scheduler.onPlayer(plugin, seller, sp -> sp.sendMessage(msg), null);
         }
 
+        // 成交价进入市场锚点学习窗口（动态价格发现）
+        plugin.priceAnchor().record(item.getType(), price * 1000L / item.getAmount());
+
         plugin.storage().requestSave();
         return BuyResult.SUCCESS;
     }

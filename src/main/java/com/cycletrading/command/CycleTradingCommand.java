@@ -153,11 +153,38 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
             p.sendMessage("§c请手持要出售的物品再执行 /ct sell <价格>");
             return;
         }
+        // 通货禁挂：绿宝石本身不进市场（存取/兑换走银行）
+        if (hand.getType() == Material.EMERALD || hand.getType() == Material.EMERALD_BLOCK) {
+            p.sendMessage("§c绿宝石是通货，不接受上架（存取/兑换请用 /ct bank）");
+            return;
+        }
+        // 价值锚点软区间（村民交易基础价 → 市场成交学习；0.5× ~ band×）
+        long anchor = plugin.priceAnchor().anchorMilli(hand.getType());
+        if (anchor > 0) {
+            String src = plugin.priceAnchor().anchorSource(hand.getType());
+            p.sendMessage("§7参考价: " + fmtPrice(anchor) + " 绿宝石/个（" + src + "）· 该组参考总价约 "
+                    + fmtPrice(anchor * hand.getAmount()) + " 绿宝石");
+            if (!plugin.priceAnchor().inBand(hand.getType(), hand.getAmount(), price)) {
+                double band = plugin.anchorBand();
+                p.sendMessage("§c价格超出参考区间（0.5× ~ " + band + "×），请按参考价合理定价"
+                        + (band <= 0 ? "" : "") + "。参考总价区间约 [" + fmtPrice((long)(anchor * hand.getAmount() / band))
+                        + ", " + fmtPrice((long)(anchor * hand.getAmount() * band)) + "] 绿宝石");
+                return;
+            }
+        }
         // 托管：物品从手中移除，进入系统存档
         p.getInventory().setItemInMainHand(new ItemStack(Material.AIR));
         market.create(p.getUniqueId().toString(), p.getName(), hand, price);
         p.sendMessage("§a上架成功！§e" + hand.getType().name() + " ×" + hand.getAmount()
                 + " §a售价 §e" + price + " 绿宝石§a。用 /ct market 查看市场");
+    }
+
+    /** 毫绿宝石格式化：整数显示整数，否则 3 位小数。 */
+    private String fmtPrice(long milli) {
+        if (milli % 1000 == 0) {
+            return fmt(milli / 1000);
+        }
+        return String.format("%.3f", milli / 1000.0);
     }
 
     private void myCmd(CommandSender sender) {

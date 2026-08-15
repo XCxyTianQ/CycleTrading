@@ -11,6 +11,7 @@ import com.cycletrading.core.luxury.LuxuryMarket;
 import com.cycletrading.core.mailbox.Mailbox;
 import com.cycletrading.core.options.OptionsService;
 import com.cycletrading.core.options.PriceHistory;
+import com.cycletrading.core.prices.PriceAnchor;
 import com.cycletrading.gui.GuiManager;
 import java.io.File;
 import java.util.ArrayList;
@@ -40,6 +41,7 @@ public final class CycleTradingPlugin extends JavaPlugin {
     private FuturesService futures;
     private OptionsService options;
     private PriceHistory priceHistory;
+    private PriceAnchor priceAnchor;
     private Storage storage;
 
     @Override
@@ -56,20 +58,23 @@ public final class CycleTradingPlugin extends JavaPlugin {
         futures = new FuturesService(this);
         options = new OptionsService(this);
         priceHistory = new PriceHistory(this);
+        priceAnchor = new PriceAnchor(this);
         market.attachBank(bank);
         luxury.attach(bank);
         bonds.attachBank(bank);
         futures.attachBank(bank);
         options.attach(bank, priceHistory);
-        storage.attach(market, bank, luxury, mailbox, bonds, futures, options);
+        storage.attach(market, bank, luxury, mailbox, bonds, futures, options, priceAnchor);
         storage.load();
         priceHistory.rebuild(futures.deliveredContracts());
+        priceAnchor.bootstrapVillagers();
         bonds.start();
         futures.start();
         options.start();
 
         GuiManager guis = new GuiManager(this, market, luxury);
         getServer().getPluginManager().registerEvents(guis, this);
+        getServer().getPluginManager().registerEvents(priceAnchor, this);
 
         PluginCommand cmd = getCommand("cycletrading");
         if (cmd != null) {
@@ -131,6 +136,10 @@ public final class CycleTradingPlugin extends JavaPlugin {
 
     public PriceHistory priceHistory() {
         return priceHistory;
+    }
+
+    public PriceAnchor priceAnchor() {
+        return priceAnchor;
     }
 
     public Storage storage() {
@@ -230,6 +239,16 @@ public final class CycleTradingPlugin extends JavaPlugin {
     /** 品种参考价（期权结算价兜底锚，config options.reference.<key>）。 */
     public long optionReference(String key) {
         return getConfig().getLong("options.reference." + key, DEFAULT_REFERENCE.getOrDefault(key, 0L));
+    }
+
+    /** 市场软区间倍数（0 = 不限制）。 */
+    public double anchorBand() {
+        return getConfig().getDouble("market.anchor-band", 2.0);
+    }
+
+    /** 市场成交价学习窗口。 */
+    public int anchorHistory() {
+        return getConfig().getInt("market.anchor-history", 10);
     }
 
     private static final Map<String, Long> DEFAULT_REFERENCE = Map.of(

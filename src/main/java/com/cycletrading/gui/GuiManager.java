@@ -799,6 +799,10 @@ public final class GuiManager implements Listener {
         List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
         lore.add("");
         lore.add("§7价格: §a" + l.price + " 绿宝石");
+        long anchor = plugin.priceAnchor().anchorMilli(it.getType());
+        if (anchor > 0) {
+            lore.add("§7参考价: §e" + fmtPrice(anchor) + " 绿宝石/个（" + plugin.priceAnchor().anchorSource(it.getType()) + "）");
+        }
         lore.add("§7卖家: §f" + l.sellerName);
         lore.add("§7编号: #" + l.id);
         for (String s : extraLore) {
@@ -807,6 +811,14 @@ public final class GuiManager implements Listener {
         meta.setLore(lore);
         it.setItemMeta(meta);
         return it;
+    }
+
+    /** 毫绿宝石格式化：整数显示整数，否则 3 位小数。 */
+    private static String fmtPrice(long milli) {
+        if (milli % 1000 == 0) {
+            return String.format("%,d", milli / 1000);
+        }
+        return String.format("%.3f", milli / 1000.0);
     }
 
     private ItemStack luxDisplay(LuxuryListing l, String... extraLore) {

@@ -8,6 +8,7 @@ import com.cycletrading.core.futures.FuturesContract;
 import com.cycletrading.core.luxury.LuxuryListing;
 import com.cycletrading.core.mailbox.Mailbox;
 import com.cycletrading.core.options.OptionContract;
+import com.cycletrading.core.prices.PriceAnchor;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import java.io.IOException;
@@ -16,6 +17,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -65,6 +67,11 @@ public final class Storage {
         public List<OptionContract> contracts = new ArrayList<>();
     }
 
+    /** 市场锚点快照（成交学习窗口；村民基础价启动时重新注册）。 */
+    public static final class PriceAnchorSnapshot {
+        public Map<String, List<Long>> recent = new java.util.HashMap<>();
+    }
+
     private final CycleTradingPlugin plugin;
     private final Path marketFile;
     private final Path bankFile;
@@ -73,6 +80,7 @@ public final class Storage {
     private final Path bondFile;
     private final Path futuresFile;
     private final Path optionsFile;
+    private final Path pricesFile;
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
     private final ExecutorService io = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "cycletrading-io");
@@ -87,6 +95,7 @@ public final class Storage {
     private volatile com.cycletrading.core.bond.BondService bonds;
     private volatile com.cycletrading.core.futures.FuturesService futures;
     private volatile com.cycletrading.core.options.OptionsService options;
+    private volatile PriceAnchor priceAnchor;
 
     public Storage(CycleTradingPlugin plugin, Path dataDir) {
         this.plugin = plugin;
@@ -97,6 +106,7 @@ public final class Storage {
         this.bondFile = dataDir.resolve("bonds.json");
         this.futuresFile = dataDir.resolve("futures.json");
         this.optionsFile = dataDir.resolve("options.json");
+        this.pricesFile = dataDir.resolve("prices.json");
     }
 
     public void attach(Market market, com.cycletrading.core.bank.Bank bank,
@@ -104,7 +114,8 @@ public final class Storage {
             Mailbox mailbox,
             com.cycletrading.core.bond.BondService bonds,
             com.cycletrading.core.futures.FuturesService futures,
-            com.cycletrading.core.options.OptionsService options) {
+            com.cycletrading.core.options.OptionsService options,
+            PriceAnchor priceAnchor) {
         this.market = market;
         this.bank = bank;
         this.luxury = luxury;
@@ -112,6 +123,7 @@ public final class Storage {
         this.bonds = bonds;
         this.futures = futures;
         this.options = options;
+        this.priceAnchor = priceAnchor;
     }
 
     /** 启动时加载存档。文件不存在或损坏时从空状态开始（损坏文件保留 .corrupt 备份）。 */
@@ -123,6 +135,7 @@ public final class Storage {
         loadBonds();
         loadFutures();
         loadOptions();
+        loadPrices();
     }
 
     private void loadMarket() {
@@ -306,6 +319,24 @@ public final class Storage {
         }
     }
 
+    private void loadPrices() {
+        if (!Files.exists(pricesFile)) {
+            return;
+        }
+        try {
+            String raw = Files.readString(pricesFile);
+            PriceAnchorSnapshot snap = gson.fromJson(raw, PriceAnchorSnapshot.class);
+            if (snap != null && snap.recent != null) {
+                priceAnchor.restore(snap.recent);
+            }
+            plugin.getLogger().info("PriceAnchor loaded: " + (snap == null || snap.recent == null ? 0 : snap.recent.size())
+                    + " items with market history");
+        } catch (Exception e) {
+            plugin.getLogger().severe("Failed to load prices data: " + e.getMessage());
+            quarantine(pricesFile);
+        }
+    }
+
     private void quarantine(Path file) {
         try {
             Files.move(file, file.resolveSibling(file.getFileName().toString() + ".corrupt-" + System.currentTimeMillis()),
@@ -352,6 +383,10 @@ public final class Storage {
         OptionsSnapshot os = new OptionsSnapshot();
         os.contracts = new ArrayList<>(options.snapshot());
         writeJson(optionsFile, os);
+
+        PriceAnchorSnapshot ps = new PriceAnchorSnapshot();
+        ps.recent.putAll(priceAnchor.snapshot());
+        writeJson(pricesFile, ps);
     }
 
     private void writeJson(Path file, Object obj) {
