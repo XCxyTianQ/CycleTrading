@@ -217,6 +217,11 @@ public final class LuxuryMarket {
         if (earnings > 0 && listerUuid != null) {
             bank.credit(listerUuid, l.listedBy, earnings, TxEntry.LUX_SELL);
         }
+        // 成交税入国库
+        long tax = taxOf(price);
+        if (tax > 0) {
+            bank.credit(Bank.SYSTEM, "SYSTEM", tax, TxEntry.TAX);
+        }
         if (listerUuid != null) {
             Player lister = plugin.getServer().getPlayer(UUID.fromString(listerUuid));
             if (lister != null && lister.isOnline()) {

@@ -129,6 +129,17 @@ public final class OptionsService {
         return (int) contracts.values().stream().filter(c -> c.status.equals(status)).count();
     }
 
+    /** 锁定中的卖方保证金（LOCKED 合约行权价合计，供经济公报）。 */
+    public long lockedValue() {
+        long sum = 0;
+        for (OptionContract c : contracts.values()) {
+            if (c.isLocked()) {
+                sum += c.strike;
+            }
+        }
+        return sum;
+    }
+
     // ---------- 开仓（卖方，玩家线程） ----------
 
     /** 开仓：卖方托管行权价作为全额保证金。 */

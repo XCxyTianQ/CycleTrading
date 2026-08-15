@@ -181,9 +181,14 @@ public final class Market {
         if (earnings > 0) {
             bank.credit(sellerUuid, l.sellerName, earnings, TxEntry.SELL);
         }
+        // 成交税入国库（金条准备金 / 央行可用资金）
+        long tax = taxOf(price);
+        if (tax > 0) {
+            bank.credit(Bank.SYSTEM, "SYSTEM", tax, TxEntry.TAX);
+        }
         if (seller != null && seller.isOnline()) {
             String msg = "§a你的挂单 #" + id + " 已售出，收益 §e" + earnings + " 绿宝石§a已存入银行"
-                    + (taxOf(price) > 0 ? "§7（税后）" : "") + "，/ct bank 查看";
+                    + (tax > 0 ? "§7（税后）" : "") + "，/ct bank 查看";
             Scheduler.onPlayer(plugin, seller, sp -> sp.sendMessage(msg), null);
         }
 

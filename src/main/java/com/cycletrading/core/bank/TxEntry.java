@@ -23,6 +23,16 @@ public final class TxEntry {
     public static final String OPTION_PAYOUT = "OPTION_PAYOUT";       // 期权到期赔付（买方收入）
     public static final String OPTION_MARGIN_RETURN = "OPTION_MARGIN_RETURN"; // 期权保证金退还
     public static final String OPTION_REFUND = "OPTION_REFUND";       // 期权撤销退款（买方权利金）
+    public static final String TAX = "TAX";                           // 成交税入国库
+    public static final String GOLD_SEED = "GOLD_SEED";               // 金条准备金一次性注资
+    public static final String GOLD_BUY = "GOLD_BUY";                 // 购买金条（买方支出）
+    public static final String GOLD_ISSUE = "GOLD_ISSUE";             // 购金条款入国库
+    public static final String GOLD_SELL = "GOLD_SELL";               // 卖出金条（卖方收入）
+    public static final String GOLD_REDEEM = "GOLD_REDEEM";           // 金条赎回国库付款
+    public static final String CB_DISTRIBUTE = "CB_DISTRIBUTE";       // 央行人均发行
+    public static final String CB_SPEND = "CB_SPEND";                 // 央行定向支出
+    public static final String CB_GRANT = "CB_GRANT";                 // 央行补贴（玩家收入）
+    public static final String CB_TAX = "CB_TAX";                     // 央行定向征税（国库收入）
     public static final String REFUND = "REFUND";    // 交易失败退款
     public static final String ADMIN_SET = "ADMIN_SET";
     public static final String ADMIN_ADD = "ADMIN_ADD";

@@ -11,6 +11,7 @@ import com.cycletrading.core.bond.BondService;
 import com.cycletrading.core.futures.Commodity;
 import com.cycletrading.core.futures.FuturesContract;
 import com.cycletrading.core.futures.FuturesService;
+import com.cycletrading.core.gold.GoldService;
 import com.cycletrading.core.luxury.LuxuryMarket;
 import com.cycletrading.core.options.OptionContract;
 import com.cycletrading.core.options.OptionsService;
@@ -38,10 +39,11 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
     private final BondService bonds;
     private final FuturesService futures;
     private final OptionsService options;
+    private final GoldService gold;
     private final GuiManager guis;
 
     public CycleTradingCommand(CycleTradingPlugin plugin, Market market, Bank bank, LuxuryMarket luxury,
-            BondService bonds, FuturesService futures, OptionsService options, GuiManager guis) {
+            BondService bonds, FuturesService futures, OptionsService options, GoldService gold, GuiManager guis) {
         this.plugin = plugin;
         this.market = market;
         this.bank = bank;
@@ -49,6 +51,7 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         this.bonds = bonds;
         this.futures = futures;
         this.options = options;
+        this.gold = gold;
         this.guis = guis;
     }
 
@@ -69,6 +72,8 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
             case "bond" -> bondCmd(sender, args);
             case "fut" -> futCmd(sender, args);
             case "opt" -> optCmd(sender, args);
+            case "gold" -> goldCmd(sender, args);
+            case "cb" -> cbCmd(sender, args);
             case "admin" -> adminCmd(sender, args);
             default -> sender.sendMessage("§c未知子命令，输入 /ct help 查看帮助");
         }
@@ -99,7 +104,12 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         s.sendMessage("§6/ct opt help    §7期权通俗指南");
         s.sendMessage("§6/ct opt open <call|put> <品种> <行权价> <权利金> <期限> §7开仓卖期权");
         s.sendMessage("§6/ct opt my      §7我的期权（撤单/到期状态）");
+        s.sendMessage("§6/ct gold        §7金条行情（恒定发行，价格挂钩国库）");
+        s.sendMessage("§6/ct gold buy/sell <数量> §7即买即卖金条（仅虚拟余额）");
         if (s.hasPermission("cycletrading.admin")) {
+            s.sendMessage("§c/ct cb report  §7中央银行经济公报");
+            s.sendMessage("§c/ct cb distribute <金额> | grant <玩家> <金额> | tax <玩家> <金额>");
+            s.sendMessage("§c/ct cb anchor <lux|bond> <锚点>  §7利率决议（0=恢复配置）");
             s.sendMessage("§c/ct lux list <基础价>  §7手持珍稀物品挂售（仅管理员）");
             s.sendMessage("§c/ct lux remove <编号> §7下架奢侈品");
             s.sendMessage("§c/ct bond admin stats|view <玩家>");
@@ -728,6 +738,229 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
         }
     }
 
+    // ---------- 投资金条（国库股） ----------
+
+    private void goldCmd(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            goldInfo(sender);
+            return;
+        }
+        switch (args[1].toLowerCase()) {
+            case "info" -> goldInfo(sender);
+            case "buy" -> goldTrade(sender, args, true);
+            case "sell" -> goldTrade(sender, args, false);
+            case "my" -> goldMy(sender);
+            default -> goldInfo(sender);
+        }
+    }
+
+    private void goldInfo(CommandSender s) {
+        if (!plugin.goldEnabled()) {
+            s.sendMessage("§c金条市场暂未启用");
+            return;
+        }
+        s.sendMessage("§e===== 投资金条（国库股） =====");
+        s.sendMessage("§6当前价: §a" + fmt(gold.price()) + " 绿宝石/根");
+        s.sendMessage("§7恒定发行: " + fmt(gold.total()) + " 根 · 在外: " + fmt(gold.outstanding())
+                + " · 国库余额: " + fmt(gold.treasury()) + " 绿宝石");
+        s.sendMessage("§7准备金占用: " + fmt(gold.reserved()) + " · 可自由支配: " + fmt(gold.freeTreasury()));
+        s.sendMessage("§7价格 = 国库余额 ÷ 发行量 · 买=资金入国库（价涨）· 卖=国库付款（价跌）");
+        s.sendMessage("§7买入: /ct gold buy <数量> · 卖出: /ct gold sell <数量>（仅虚拟余额）");
+    }
+
+    private void goldTrade(CommandSender sender, String[] args, boolean buy) {
+        if (!requirePlayer(sender)) {
+            return;
+        }
+        Player p = (Player) sender;
+        if (args.length < 3) {
+            p.sendMessage("§c用法: /ct gold " + (buy ? "buy" : "sell") + " <数量>");
+            return;
+        }
+        long qty;
+        try {
+            qty = Long.parseLong(args[2]);
+        } catch (NumberFormatException ex) {
+            p.sendMessage("§c数量必须是整数");
+            return;
+        }
+        GoldService.TradeResult r = buy ? gold.buy(p, qty) : gold.sell(p, qty);
+        switch (r) {
+            case SUCCESS -> p.sendMessage("§a" + (buy ? "买入" : "卖出") + " §e" + fmt(qty)
+                    + " §a根金条 · 成交价 §e" + fmt(gold.price()) + " 绿宝石/根"
+                    + " · 当前持仓 §e" + fmt(gold.held(p.getUniqueId().toString())) + " 根");
+            case FROZEN -> p.sendMessage("§c账户已被冻结");
+            case INSUFFICIENT_FUNDS -> p.sendMessage("§c银行余额不足（需要 " + fmt(gold.price() * qty) + " 绿宝石）");
+            case INSUFFICIENT_BARS -> p.sendMessage("§c持仓不足");
+            case INVALID_AMOUNT -> p.sendMessage("§c数量必须大于 0");
+            case DISABLED -> p.sendMessage("§c金条市场暂未启用");
+        }
+    }
+
+    private void goldMy(CommandSender sender) {
+        if (!requirePlayer(sender)) {
+            return;
+        }
+        Player p = (Player) sender;
+        long held = gold.held(p.getUniqueId().toString());
+        p.sendMessage("§e===== 我的金条 =====");
+        p.sendMessage("§6持仓: §a" + fmt(held) + " §7根 · 市值约 §a" + fmt(held * gold.price()) + " §7绿宝石");
+        p.sendMessage("§7卖出: /ct gold sell <数量>（按当前价即时成交）");
+    }
+
+    // ---------- 中央银行（控制台/管理员） ----------
+
+    private void cbCmd(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("cycletrading.admin")) {
+            sender.sendMessage("§c权限不足");
+            return;
+        }
+        if (args.length < 2) {
+            cbReport(sender);
+            return;
+        }
+        switch (args[1].toLowerCase()) {
+            case "report" -> cbReport(sender);
+            case "distribute" -> cbDistribute(sender, args);
+            case "grant" -> cbGrant(sender, args, false);
+            case "tax" -> cbGrant(sender, args, true);
+            case "anchor" -> cbAnchor(sender, args);
+            default -> cbReport(sender);
+        }
+    }
+
+    /** 经济公报。 */
+    private void cbReport(CommandSender s) {
+        long locked = bonds.totalLocked() + gold.reserved() + futures.lockedValue() + options.lockedValue();
+        s.sendMessage("§e===== 中央银行经济公报 =====");
+        s.sendMessage("§6总存量 M: §a" + fmt(bank.playerSupply()) + " 绿宝石");
+        s.sendMessage("§6锁定资金: §a" + fmt(locked) + " §7(债券 " + fmt(bonds.totalLocked())
+                + " + 金条准备金 " + fmt(gold.reserved()) + " + 期货 " + fmt(futures.lockedValue())
+                + " + 期权 " + fmt(options.lockedValue()) + ")");
+        s.sendMessage("§6国库: §a" + fmt(gold.treasury()) + " §7(准备金占用 " + fmt(gold.reserved())
+                + " · 可支配 " + fmt(gold.freeTreasury()) + ")");
+        s.sendMessage("§6金条: §a" + fmt(gold.price()) + " 绿宝石/根 §7(发行 " + fmt(gold.total())
+                + " · 在外 " + fmt(gold.outstanding()) + ")");
+        s.sendMessage("§6Lux 倍率: §a" + String.format("%.3f", luxury.multiplier()) + "×§7(锚点 "
+                + fmt(plugin.luxurySupplyAnchor()) + (plugin.getLuxAnchorOverride() > 0 ? "，央行覆盖" : "") + ")");
+        s.sendMessage("§6债券倍率: §a" + String.format("%.3f", bonds.rateMultiplier()) + "×§7(锚点 "
+                + fmt(plugin.bondRateAnchor()) + (plugin.getBondAnchorOverride() > 0 ? "，央行覆盖" : "") + ")");
+        s.sendMessage("§7成交税: " + plugin.taxPercent() + "% → 国库 · 央行工具: distribute/grant/tax/anchor");
+    }
+
+    private void cbDistribute(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sender.sendMessage("§c用法: /ct cb distribute <每人金额>");
+            return;
+        }
+        long amt;
+        try {
+            amt = Long.parseLong(args[2]);
+        } catch (NumberFormatException ex) {
+            sender.sendMessage("§c金额必须是整数");
+            return;
+        }
+        if (amt <= 0) {
+            sender.sendMessage("§c金额必须大于 0");
+            return;
+        }
+        List<BankAccount> accounts = bank.accountsSnapshot().stream()
+                .filter(a -> !Bank.SYSTEM.equals(a.owner)).toList();
+        if (accounts.isEmpty()) {
+            sender.sendMessage("§c没有可发放的账户");
+            return;
+        }
+        long total = amt * accounts.size();
+        if (total > gold.freeTreasury()) {
+            sender.sendMessage("§c国库可支配资金不足（需要 " + fmt(total) + "，可用 " + fmt(gold.freeTreasury()) + "）");
+            return;
+        }
+        bank.debit(Bank.SYSTEM, total, TxEntry.CB_SPEND);
+        for (BankAccount a : accounts) {
+            bank.credit(a.owner, a.name, amt, TxEntry.CB_DISTRIBUTE);
+        }
+        sender.sendMessage("§a已向 " + accounts.size() + " 个账户人均发放 §e" + fmt(amt) + " 绿宝石"
+                + "§7（国库支出 " + fmt(total) + "）");
+    }
+
+    private void cbGrant(CommandSender sender, String[] args, boolean isTax) {
+        if (args.length < 4) {
+            sender.sendMessage("§c用法: /ct cb " + (isTax ? "tax" : "grant") + " <玩家> <金额>");
+            return;
+        }
+        long amt;
+        try {
+            amt = Long.parseLong(args[3]);
+        } catch (NumberFormatException ex) {
+            sender.sendMessage("§c金额必须是整数");
+            return;
+        }
+        if (amt <= 0) {
+            sender.sendMessage("§c金额必须大于 0");
+            return;
+        }
+        UUID target = resolveUuid(args[2]);
+        if (target == null) {
+            sender.sendMessage("§c找不到玩家 " + args[2]);
+            return;
+        }
+        String uuid = target.toString();
+        if (isTax) {
+            if (bank.balance(uuid) < amt) {
+                sender.sendMessage("§c对方余额不足");
+                return;
+            }
+            bank.debit(uuid, amt, TxEntry.CB_TAX);
+            bank.credit(Bank.SYSTEM, "SYSTEM", amt, TxEntry.CB_TAX);
+            sender.sendMessage("§a已向 " + args[2] + " 征税 §e" + fmt(amt) + " 绿宝石§7（入国库）");
+        } else {
+            if (amt > gold.freeTreasury()) {
+                sender.sendMessage("§c国库可支配资金不足（需要 " + fmt(amt) + "，可用 " + fmt(gold.freeTreasury()) + "）");
+                return;
+            }
+            bank.debit(Bank.SYSTEM, amt, TxEntry.CB_SPEND);
+            bank.credit(uuid, args[2], amt, TxEntry.CB_GRANT);
+            sender.sendMessage("§a已向 " + args[2] + " 发放补贴 §e" + fmt(amt) + " 绿宝石§7（国库支出）");
+        }
+    }
+
+    private void cbAnchor(CommandSender sender, String[] args) {
+        if (args.length < 4) {
+            sender.sendMessage("§c用法: /ct cb anchor <lux|bond> <锚点>（0 = 恢复配置值）");
+            return;
+        }
+        long v;
+        try {
+            v = Long.parseLong(args[3]);
+        } catch (NumberFormatException ex) {
+            sender.sendMessage("§c锚点必须是整数");
+            return;
+        }
+        if (v < 0) {
+            sender.sendMessage("§c锚点必须 ≥ 0");
+            return;
+        }
+        if (args[2].equalsIgnoreCase("lux")) {
+            plugin.setLuxAnchorOverride(v);
+            sender.sendMessage("§a央行利率决议：Lux 锚点 → §e" + (v == 0 ? "恢复配置（" + fmt(getConfigLuxAnchor()) + "）" : fmt(v))
+                    + "§7 · 当前倍率 " + String.format("%.3f", luxury.multiplier()) + "×");
+        } else if (args[2].equalsIgnoreCase("bond")) {
+            plugin.setBondAnchorOverride(v);
+            sender.sendMessage("§a央行利率决议：债券锚点 → §e" + (v == 0 ? "恢复配置（" + fmt(getConfigBondAnchor()) + "）" : fmt(v))
+                    + "§7 · 当前倍率 " + String.format("%.3f", bonds.rateMultiplier()) + "×");
+        } else {
+            sender.sendMessage("§c目标必须是 lux 或 bond");
+        }
+    }
+
+    private long getConfigLuxAnchor() {
+        return plugin.getConfig().getLong("luxury.supply-anchor", 1000000L);
+    }
+
+    private long getConfigBondAnchor() {
+        return plugin.getConfig().getLong("bond.rate-anchor", 1000000L);
+    }
+
     // ---------- 定期债券 ----------
 
     private void bondCmd(CommandSender sender, String[] args) {
@@ -1067,7 +1300,16 @@ public final class CycleTradingCommand implements CommandExecutor, TabCompleter 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return List.of("market", "sell", "my", "collect", "mail", "bank", "lux", "bond", "fut", "opt", "help");
+            return List.of("market", "sell", "my", "collect", "mail", "bank", "lux", "bond", "fut", "opt", "gold", "help");
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("gold")) {
+            return List.of("info", "buy", "sell", "my");
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("cb")) {
+            return List.of("report", "distribute", "grant", "tax", "anchor");
+        }
+        if (args.length == 3 && args[0].equalsIgnoreCase("cb") && args[1].equalsIgnoreCase("anchor")) {
+            return List.of("lux", "bond");
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("fut")) {
             return List.of("help", "info", "open", "my", "cancel", "admin");

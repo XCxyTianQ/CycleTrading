@@ -89,6 +89,17 @@ public final class FuturesService {
         return (int) contracts.values().stream().filter(c -> c.status.equals(status)).count();
     }
 
+    /** 锁定中的买方资金（LOCKED 合约价格合计，供经济公报）。 */
+    public long lockedValue() {
+        long sum = 0;
+        for (FuturesContract c : contracts.values()) {
+            if (c.isLocked()) {
+                sum += c.price;
+            }
+        }
+        return sum;
+    }
+
     // ---------- 开仓（卖方，玩家线程） ----------
 
     /** 开仓：商品已由调用方从手中移除（品种/数量已校验）。 */
@@ -292,6 +303,11 @@ public final class FuturesService {
         }
         long earnings = c.price - taxOf(c.price);
         bank.credit(c.seller, c.sellerName, earnings, TxEntry.FUTURES_SELL);
+        // 成交税入国库
+        long tax = taxOf(c.price);
+        if (tax > 0) {
+            bank.credit(Bank.SYSTEM, "SYSTEM", tax, TxEntry.TAX);
+        }
         c.status = FuturesContract.DELIVERED;
         c.deliveredAt = System.currentTimeMillis();
         // 交割价入库 → 期权结算价来源

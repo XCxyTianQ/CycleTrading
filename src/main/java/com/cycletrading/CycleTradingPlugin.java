@@ -7,6 +7,7 @@ import com.cycletrading.core.bank.Bank;
 import com.cycletrading.core.bond.BondService;
 import com.cycletrading.core.futures.Commodity;
 import com.cycletrading.core.futures.FuturesService;
+import com.cycletrading.core.gold.GoldService;
 import com.cycletrading.core.luxury.LuxuryMarket;
 import com.cycletrading.core.mailbox.Mailbox;
 import com.cycletrading.core.options.OptionsService;
@@ -42,7 +43,12 @@ public final class CycleTradingPlugin extends JavaPlugin {
     private OptionsService options;
     private PriceHistory priceHistory;
     private PriceAnchor priceAnchor;
+    private GoldService gold;
     private Storage storage;
+
+    /** 央行利率决议运行时覆盖（0 = 用配置值）。 */
+    private volatile long luxAnchorOverride = 0;
+    private volatile long bondAnchorOverride = 0;
 
     @Override
     public void onEnable() {
@@ -59,14 +65,17 @@ public final class CycleTradingPlugin extends JavaPlugin {
         options = new OptionsService(this);
         priceHistory = new PriceHistory(this);
         priceAnchor = new PriceAnchor(this);
+        gold = new GoldService(this);
         market.attachBank(bank);
         luxury.attach(bank);
         bonds.attachBank(bank);
         futures.attachBank(bank);
         options.attach(bank, priceHistory);
-        storage.attach(market, bank, luxury, mailbox, bonds, futures, options, priceAnchor);
+        gold.attachBank(bank);
+        storage.attach(market, bank, luxury, mailbox, bonds, futures, options, priceAnchor, gold);
         storage.load();
         priceHistory.rebuild(futures.deliveredContracts());
+        gold.seedIfNeeded();
         priceAnchor.bootstrapVillagers();
         bonds.start();
         futures.start();
@@ -78,7 +87,7 @@ public final class CycleTradingPlugin extends JavaPlugin {
 
         PluginCommand cmd = getCommand("cycletrading");
         if (cmd != null) {
-            CycleTradingCommand executor = new CycleTradingCommand(this, market, bank, luxury, bonds, futures, options, guis);
+            CycleTradingCommand executor = new CycleTradingCommand(this, market, bank, luxury, bonds, futures, options, gold, guis);
             cmd.setExecutor(executor);
             cmd.setTabCompleter(executor);
         }
@@ -142,6 +151,10 @@ public final class CycleTradingPlugin extends JavaPlugin {
         return priceAnchor;
     }
 
+    public GoldService gold() {
+        return gold;
+    }
+
     public Storage storage() {
         return storage;
     }
@@ -167,7 +180,7 @@ public final class CycleTradingPlugin extends JavaPlugin {
     }
 
     public long luxurySupplyAnchor() {
-        return getConfig().getLong("luxury.supply-anchor", 1000000L);
+        return luxAnchorOverride > 0 ? luxAnchorOverride : getConfig().getLong("luxury.supply-anchor", 1000000L);
     }
 
     public double luxuryMaxMultiplier() {
@@ -187,7 +200,7 @@ public final class CycleTradingPlugin extends JavaPlugin {
     }
 
     public long bondRateAnchor() {
-        return getConfig().getLong("bond.rate-anchor", 1000000L);
+        return bondAnchorOverride > 0 ? bondAnchorOverride : getConfig().getLong("bond.rate-anchor", 1000000L);
     }
 
     public double bondMaxMultiplier() {
@@ -249,6 +262,35 @@ public final class CycleTradingPlugin extends JavaPlugin {
     /** 市场成交价学习窗口。 */
     public int anchorHistory() {
         return getConfig().getInt("market.anchor-history", 10);
+    }
+
+    public boolean goldEnabled() {
+        return getConfig().getBoolean("gold.enabled", true);
+    }
+
+    public long goldTotal() {
+        return getConfig().getLong("gold.total", 1000000L);
+    }
+
+    public long goldSeed() {
+        return getConfig().getLong("gold.seed", 1000000L);
+    }
+
+    /** 央行利率决议：热调锚点（0 = 恢复配置值）。 */
+    public void setLuxAnchorOverride(long v) {
+        this.luxAnchorOverride = v;
+    }
+
+    public void setBondAnchorOverride(long v) {
+        this.bondAnchorOverride = v;
+    }
+
+    public long getLuxAnchorOverride() {
+        return luxAnchorOverride;
+    }
+
+    public long getBondAnchorOverride() {
+        return bondAnchorOverride;
     }
 
     private static final Map<String, Long> DEFAULT_REFERENCE = Map.of(

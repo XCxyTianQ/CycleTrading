@@ -72,6 +72,12 @@ public final class Storage {
         public Map<String, List<Long>> recent = new java.util.HashMap<>();
     }
 
+    /** 金条快照。 */
+    public static final class GoldSnapshot {
+        public boolean seeded = false;
+        public Map<String, Long> holdings = new java.util.HashMap<>();
+    }
+
     private final CycleTradingPlugin plugin;
     private final Path marketFile;
     private final Path bankFile;
@@ -81,6 +87,7 @@ public final class Storage {
     private final Path futuresFile;
     private final Path optionsFile;
     private final Path pricesFile;
+    private final Path goldFile;
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
     private final ExecutorService io = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "cycletrading-io");
@@ -96,6 +103,7 @@ public final class Storage {
     private volatile com.cycletrading.core.futures.FuturesService futures;
     private volatile com.cycletrading.core.options.OptionsService options;
     private volatile PriceAnchor priceAnchor;
+    private volatile com.cycletrading.core.gold.GoldService gold;
 
     public Storage(CycleTradingPlugin plugin, Path dataDir) {
         this.plugin = plugin;
@@ -107,6 +115,7 @@ public final class Storage {
         this.futuresFile = dataDir.resolve("futures.json");
         this.optionsFile = dataDir.resolve("options.json");
         this.pricesFile = dataDir.resolve("prices.json");
+        this.goldFile = dataDir.resolve("gold.json");
     }
 
     public void attach(Market market, com.cycletrading.core.bank.Bank bank,
@@ -115,7 +124,8 @@ public final class Storage {
             com.cycletrading.core.bond.BondService bonds,
             com.cycletrading.core.futures.FuturesService futures,
             com.cycletrading.core.options.OptionsService options,
-            PriceAnchor priceAnchor) {
+            PriceAnchor priceAnchor,
+            com.cycletrading.core.gold.GoldService gold) {
         this.market = market;
         this.bank = bank;
         this.luxury = luxury;
@@ -124,6 +134,7 @@ public final class Storage {
         this.futures = futures;
         this.options = options;
         this.priceAnchor = priceAnchor;
+        this.gold = gold;
     }
 
     /** 启动时加载存档。文件不存在或损坏时从空状态开始（损坏文件保留 .corrupt 备份）。 */
@@ -136,6 +147,7 @@ public final class Storage {
         loadFutures();
         loadOptions();
         loadPrices();
+        loadGold();
     }
 
     private void loadMarket() {
@@ -337,6 +349,23 @@ public final class Storage {
         }
     }
 
+    private void loadGold() {
+        if (!Files.exists(goldFile)) {
+            return;
+        }
+        try {
+            String raw = Files.readString(goldFile);
+            GoldSnapshot snap = gson.fromJson(raw, GoldSnapshot.class);
+            if (snap != null) {
+                gold.restore(snap.holdings, snap.seeded);
+            }
+            plugin.getLogger().info("Gold loaded: " + gold.outstanding() + " bars outstanding, treasury " + gold.treasury());
+        } catch (Exception e) {
+            plugin.getLogger().severe("Failed to load gold data: " + e.getMessage());
+            quarantine(goldFile);
+        }
+    }
+
     private void quarantine(Path file) {
         try {
             Files.move(file, file.resolveSibling(file.getFileName().toString() + ".corrupt-" + System.currentTimeMillis()),
@@ -387,6 +416,11 @@ public final class Storage {
         PriceAnchorSnapshot ps = new PriceAnchorSnapshot();
         ps.recent.putAll(priceAnchor.snapshot());
         writeJson(pricesFile, ps);
+
+        GoldSnapshot gs = new GoldSnapshot();
+        gs.seeded = gold.isSeeded();
+        gs.holdings.putAll(gold.snapshot());
+        writeJson(goldFile, gs);
     }
 
     private void writeJson(Path file, Object obj) {
