@@ -1,7 +1,9 @@
 package com.cycletrading.core.futures;
 
+import com.cycletrading.util.Matures;
+
 /** 期货合约：标准化品种+数量，卖方商品全额托管，买方货款全额锁定，到期实物交割。 */
-public final class FuturesContract {
+public final class FuturesContract implements Matures {
 
     public static final String OPEN = "OPEN";            // 挂单（待成交，可撤单）
     public static final String LOCKED = "LOCKED";        // 已成交（双担保锁定，待交割）
@@ -45,5 +47,10 @@ public final class FuturesContract {
 
     public boolean isLocked() {
         return LOCKED.equals(status);
+    }
+
+    @Override
+    public long matureAt() {
+        return matureAt;
     }
 }

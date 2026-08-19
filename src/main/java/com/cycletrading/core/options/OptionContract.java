@@ -1,7 +1,9 @@
 package com.cycletrading.core.options;
 
+import com.cycletrading.util.Matures;
+
 /** 欧式期权合约：现金结算，卖方全额保证金托管（行权价），到期按结算价赔付。 */
-public final class OptionContract {
+public final class OptionContract implements Matures {
 
     public static final String CALL = "CALL";
     public static final String PUT = "PUT";
@@ -58,5 +60,10 @@ public final class OptionContract {
 
     public boolean isCall() {
         return CALL.equals(type);
+    }
+
+    @Override
+    public long matureAt() {
+        return matureAt;
     }
 }

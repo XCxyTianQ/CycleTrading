@@ -1,7 +1,9 @@
 package com.cycletrading.core.bond;
 
+import com.cycletrading.util.Matures;
+
 /** 定期债券：本金锁定，到期本息自动入账。利率以基点（万分之一）存储，购买时锁定。 */
-public final class Bond {
+public final class Bond implements Matures {
 
     public static final String ACTIVE = "ACTIVE";
     public static final String REDEEMED = "REDEEMED";
@@ -39,5 +41,10 @@ public final class Bond {
 
     public boolean isActive() {
         return ACTIVE.equals(status);
+    }
+
+    @Override
+    public long matureAt() {
+        return matureAt;
     }
 }

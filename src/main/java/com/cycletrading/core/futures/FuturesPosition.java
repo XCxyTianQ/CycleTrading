@@ -1,7 +1,9 @@
 package com.cycletrading.core.futures;
 
+import com.cycletrading.util.Matures;
+
 /** 期货多空头寸：保证金交易，到期/平仓按结算价现金结算，盈亏封顶 = 保证金。 */
-public final class FuturesPosition {
+public final class FuturesPosition implements Matures {
 
     public static final String LONG = "LONG";
     public static final String SHORT = "SHORT";
@@ -54,5 +56,10 @@ public final class FuturesPosition {
 
     public boolean isLong() {
         return LONG.equals(type);
+    }
+
+    @Override
+    public long matureAt() {
+        return matureAt;
     }
 }

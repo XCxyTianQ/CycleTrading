@@ -4,7 +4,7 @@ plugins {
 
 group = 'com.cycletrading'
 // 版本号：CI 打标签构建时用 -PpkgVersion=<tag 去 v 前缀> 覆盖
-version = providers.gradleProperty('pkgVersion').getOrElse('1.4.1')
+version = providers.gradleProperty('pkgVersion').getOrElse('2.0.0')
 
 base {
     archivesName = 'cycletrading-folia'

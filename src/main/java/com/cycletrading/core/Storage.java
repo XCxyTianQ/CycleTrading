@@ -10,13 +10,10 @@ import com.cycletrading.core.luxury.LuxuryListing;
 import com.cycletrading.core.mailbox.Mailbox;
 import com.cycletrading.core.options.OptionContract;
 import com.cycletrading.core.prices.PriceAnchor;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import java.io.IOException;
-import java.nio.file.Files;
+import com.cycletrading.storage.JsonRepository;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -24,8 +21,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * JSON 持久化：market.json（挂单+邮箱）与 bank.json（账户+流水）。
- * 单线程 IO 执行器 + 原子写（tmp + ATOMIC_MOVE）；变更异步落盘，禁用时同步 flush。
+ * 持久化协调器：JsonRepository 注册表 + 快照编排。
+ * 单线程 IO 执行器；变更异步落盘（全部快照），禁用时同步 flush。
  */
 public final class Storage {
 
@@ -46,8 +43,6 @@ public final class Storage {
         public List<LuxuryListing> listings = new ArrayList<>();
     }
 
-    /** 死亡保险已移除（v1.1）；旧 insurance.json 文件将被忽略。 */
-
     /** 邮箱快照。 */
     public static final class MailboxSnapshot {
         public List<MailEntry> entries = new ArrayList<>();
@@ -58,7 +53,7 @@ public final class Storage {
         public List<Bond> bonds = new ArrayList<>();
     }
 
-    /** 期货合约快照。 */
+    /** 期货快照（实物合约 + 多空头寸）。 */
     public static final class FuturesSnapshot {
         public List<FuturesContract> contracts = new ArrayList<>();
         public List<FuturesPosition> positions = new ArrayList<>();
@@ -71,26 +66,26 @@ public final class Storage {
 
     /** 市场锚点快照（成交学习窗口；村民基础价启动时重新注册）。 */
     public static final class PriceAnchorSnapshot {
-        public Map<String, List<Long>> recent = new java.util.HashMap<>();
+        public Map<String, List<Long>> recent = new HashMap<>();
     }
 
     /** 金条快照。 */
     public static final class GoldSnapshot {
         public boolean seeded = false;
-        public Map<String, Long> holdings = new java.util.HashMap<>();
+        public Map<String, Long> holdings = new HashMap<>();
     }
 
     private final CycleTradingPlugin plugin;
-    private final Path marketFile;
-    private final Path bankFile;
-    private final Path luxuryFile;
-    private final Path mailboxFile;
-    private final Path bondFile;
-    private final Path futuresFile;
-    private final Path optionsFile;
-    private final Path pricesFile;
-    private final Path goldFile;
-    private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
+    private final JsonRepository marketRepo;
+    private final JsonRepository bankRepo;
+    private final JsonRepository luxuryRepo;
+    private final JsonRepository mailboxRepo;
+    private final JsonRepository bondRepo;
+    private final JsonRepository futuresRepo;
+    private final JsonRepository optionsRepo;
+    private final JsonRepository pricesRepo;
+    private final JsonRepository goldRepo;
+
     private final ExecutorService io = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "cycletrading-io");
         t.setDaemon(true);
@@ -109,15 +104,15 @@ public final class Storage {
 
     public Storage(CycleTradingPlugin plugin, Path dataDir) {
         this.plugin = plugin;
-        this.marketFile = dataDir.resolve("market.json");
-        this.bankFile = dataDir.resolve("bank.json");
-        this.luxuryFile = dataDir.resolve("luxury.json");
-        this.mailboxFile = dataDir.resolve("mailbox.json");
-        this.bondFile = dataDir.resolve("bonds.json");
-        this.futuresFile = dataDir.resolve("futures.json");
-        this.optionsFile = dataDir.resolve("options.json");
-        this.pricesFile = dataDir.resolve("prices.json");
-        this.goldFile = dataDir.resolve("gold.json");
+        this.marketRepo = new JsonRepository(plugin, dataDir, "market");
+        this.bankRepo = new JsonRepository(plugin, dataDir, "bank");
+        this.luxuryRepo = new JsonRepository(plugin, dataDir, "luxury");
+        this.mailboxRepo = new JsonRepository(plugin, dataDir, "mailbox");
+        this.bondRepo = new JsonRepository(plugin, dataDir, "bonds");
+        this.futuresRepo = new JsonRepository(plugin, dataDir, "futures");
+        this.optionsRepo = new JsonRepository(plugin, dataDir, "options");
+        this.pricesRepo = new JsonRepository(plugin, dataDir, "prices");
+        this.goldRepo = new JsonRepository(plugin, dataDir, "gold");
     }
 
     public void attach(Market market, com.cycletrading.core.bank.Bank bank,
@@ -139,252 +134,127 @@ public final class Storage {
         this.gold = gold;
     }
 
-    /** 启动时加载存档。文件不存在或损坏时从空状态开始（损坏文件保留 .corrupt 备份）。 */
+    /** 启动时加载全部存档。文件不存在或损坏时从空状态开始。 */
     public void load() {
-        loadMarket();
-        loadBank();
-        loadLuxury();
-        loadMailbox();
-        loadBonds();
-        loadFutures();
-        loadOptions();
-        loadPrices();
-        loadGold();
-    }
-
-    private void loadMarket() {
-        if (!Files.exists(marketFile)) {
-            return;
-        }
-        try {
-            String raw = Files.readString(marketFile);
-            MarketSnapshot snap = gson.fromJson(raw, MarketSnapshot.class);
-            if (snap == null) {
-                return;
-            }
-            if (snap.listings != null) {
-                for (Listing l : snap.listings) {
+        MarketSnapshot ms = marketRepo.load(MarketSnapshot.class);
+        if (ms != null) {
+            if (ms.listings != null) {
+                for (Listing l : ms.listings) {
                     market.restoreListing(l);
                 }
             }
-            if (snap.mailbox != null) {
-                for (MailEntry m : snap.mailbox) {
+            if (ms.mailbox != null) {
+                for (MailEntry m : ms.mailbox) {
                     mailbox.restore(m);
                 }
-                if (!snap.mailbox.isEmpty()) {
-                    plugin.getLogger().info("Migrated " + snap.mailbox.size() + " legacy mailbox entries");
+                if (!ms.mailbox.isEmpty()) {
+                    plugin.getLogger().info("Migrated " + ms.mailbox.size() + " legacy mailbox entries");
                 }
             }
             market.rebuildNextId();
-            plugin.getLogger().info("Data loaded: " + (snap.listings == null ? 0 : snap.listings.size()) + " listings");
-        } catch (Exception e) {
-            plugin.getLogger().severe("Failed to load market data: " + e.getMessage());
-            quarantine(marketFile);
+            plugin.getLogger().info("Data loaded: " + (ms.listings == null ? 0 : ms.listings.size()) + " listings");
         }
-    }
 
-    private void loadBank() {
-        if (!Files.exists(bankFile)) {
-            return;
-        }
-        try {
-            String raw = Files.readString(bankFile);
-            BankSnapshot snap = gson.fromJson(raw, BankSnapshot.class);
-            if (snap == null) {
-                return;
-            }
-            if (snap.accounts != null) {
-                for (BankAccount a : snap.accounts) {
+        BankSnapshot bs = bankRepo.load(BankSnapshot.class);
+        if (bs != null) {
+            if (bs.accounts != null) {
+                for (BankAccount a : bs.accounts) {
                     bank.restoreAccount(a);
                 }
             }
-            if (snap.ledger != null) {
-                for (TxEntry t : snap.ledger) {
+            if (bs.ledger != null) {
+                for (TxEntry t : bs.ledger) {
                     bank.restoreTx(t);
                 }
             }
             bank.rebuildTxId();
             bank.rebuildSupply();
-            plugin.getLogger().info("Bank loaded: " + (snap.accounts == null ? 0 : snap.accounts.size())
-                    + " accounts, " + (snap.ledger == null ? 0 : snap.ledger.size())
+            plugin.getLogger().info("Bank loaded: " + (bs.accounts == null ? 0 : bs.accounts.size())
+                    + " accounts, " + (bs.ledger == null ? 0 : bs.ledger.size())
                     + " ledger entries, player supply " + bank.playerSupply());
-        } catch (Exception e) {
-            plugin.getLogger().severe("Failed to load bank data: " + e.getMessage());
-            quarantine(bankFile);
         }
-    }
 
-    private void loadLuxury() {
-        if (!Files.exists(luxuryFile)) {
-            return;
-        }
-        try {
-            String raw = Files.readString(luxuryFile);
-            LuxurySnapshot snap = gson.fromJson(raw, LuxurySnapshot.class);
-            if (snap == null) {
-                return;
-            }
-            if (snap.listings != null) {
-                for (LuxuryListing l : snap.listings) {
+        LuxurySnapshot ls = luxuryRepo.load(LuxurySnapshot.class);
+        if (ls != null) {
+            if (ls.listings != null) {
+                for (LuxuryListing l : ls.listings) {
                     luxury.restore(l);
                 }
             }
             luxury.rebuildNextId();
-            plugin.getLogger().info("Luxury loaded: " + (snap.listings == null ? 0 : snap.listings.size()) + " listings");
-        } catch (Exception e) {
-            plugin.getLogger().severe("Failed to load luxury data: " + e.getMessage());
-            quarantine(luxuryFile);
+            plugin.getLogger().info("Luxury loaded: " + (ls.listings == null ? 0 : ls.listings.size()) + " listings");
         }
-    }
 
-    private void loadMailbox() {
-        if (!Files.exists(mailboxFile)) {
-            return;
-        }
-        try {
-            String raw = Files.readString(mailboxFile);
-            MailboxSnapshot snap = gson.fromJson(raw, MailboxSnapshot.class);
-            if (snap == null) {
-                return;
-            }
-            if (snap.entries != null) {
-                for (MailEntry m : snap.entries) {
+        MailboxSnapshot mbs = mailboxRepo.load(MailboxSnapshot.class);
+        if (mbs != null) {
+            if (mbs.entries != null) {
+                for (MailEntry m : mbs.entries) {
                     mailbox.restore(m);
                 }
             }
-            plugin.getLogger().info("Mailbox loaded: " + (snap.entries == null ? 0 : snap.entries.size()) + " entries");
-        } catch (Exception e) {
-            plugin.getLogger().severe("Failed to load mailbox data: " + e.getMessage());
-            quarantine(mailboxFile);
+            plugin.getLogger().info("Mailbox loaded: " + (mbs.entries == null ? 0 : mbs.entries.size()) + " entries");
         }
-    }
 
-    private void loadBonds() {
-        if (!Files.exists(bondFile)) {
-            return;
-        }
-        try {
-            String raw = Files.readString(bondFile);
-            BondSnapshot snap = gson.fromJson(raw, BondSnapshot.class);
-            if (snap == null) {
-                return;
-            }
-            if (snap.bonds != null) {
-                for (Bond b : snap.bonds) {
+        BondSnapshot bds = bondRepo.load(BondSnapshot.class);
+        if (bds != null) {
+            if (bds.bonds != null) {
+                for (Bond b : bds.bonds) {
                     bonds.restore(b);
                 }
             }
             bonds.rebuildNextId();
-            plugin.getLogger().info("Bonds loaded: " + (snap.bonds == null ? 0 : snap.bonds.size())
+            plugin.getLogger().info("Bonds loaded: " + (bds.bonds == null ? 0 : bds.bonds.size())
                     + " bonds, " + bonds.activeCount() + " active");
-        } catch (Exception e) {
-            plugin.getLogger().severe("Failed to load bonds data: " + e.getMessage());
-            quarantine(bondFile);
         }
-    }
 
-    private void loadFutures() {
-        if (!Files.exists(futuresFile)) {
-            return;
-        }
-        try {
-            String raw = Files.readString(futuresFile);
-            FuturesSnapshot snap = gson.fromJson(raw, FuturesSnapshot.class);
-            if (snap == null) {
-                return;
-            }
-            if (snap.contracts != null) {
-                for (FuturesContract c : snap.contracts) {
+        FuturesSnapshot fs = futuresRepo.load(FuturesSnapshot.class);
+        if (fs != null) {
+            if (fs.contracts != null) {
+                for (FuturesContract c : fs.contracts) {
                     futures.restore(c);
                 }
             }
-            if (snap.positions != null) {
-                for (FuturesPosition p : snap.positions) {
+            if (fs.positions != null) {
+                for (FuturesPosition p : fs.positions) {
                     futures.restorePosition(p);
                 }
             }
             futures.rebuildNextId();
             futures.rebuildPosId();
-            plugin.getLogger().info("Futures loaded: " + (snap.contracts == null ? 0 : snap.contracts.size())
+            plugin.getLogger().info("Futures loaded: " + (fs.contracts == null ? 0 : fs.contracts.size())
                     + " contracts, " + futures.countByStatus(FuturesContract.OPEN) + " open, "
                     + futures.countByStatus(FuturesContract.LOCKED) + " locked | "
                     + futures.posCountByStatus(FuturesPosition.OPEN) + " positions open");
-        } catch (Exception e) {
-            plugin.getLogger().severe("Failed to load futures data: " + e.getMessage());
-            quarantine(futuresFile);
         }
-    }
 
-    private void loadOptions() {
-        if (!Files.exists(optionsFile)) {
-            return;
-        }
-        try {
-            String raw = Files.readString(optionsFile);
-            OptionsSnapshot snap = gson.fromJson(raw, OptionsSnapshot.class);
-            if (snap == null) {
-                return;
-            }
-            if (snap.contracts != null) {
-                for (OptionContract c : snap.contracts) {
+        OptionsSnapshot os = optionsRepo.load(OptionsSnapshot.class);
+        if (os != null) {
+            if (os.contracts != null) {
+                for (OptionContract c : os.contracts) {
                     options.restore(c);
                 }
             }
             options.rebuildNextId();
-            plugin.getLogger().info("Options loaded: " + (snap.contracts == null ? 0 : snap.contracts.size())
+            plugin.getLogger().info("Options loaded: " + (os.contracts == null ? 0 : os.contracts.size())
                     + " contracts, " + options.countByStatus(OptionContract.OPEN) + " open, "
                     + options.countByStatus(OptionContract.LOCKED) + " locked");
-        } catch (Exception e) {
-            plugin.getLogger().severe("Failed to load options data: " + e.getMessage());
-            quarantine(optionsFile);
         }
+
+        PriceAnchorSnapshot ps = pricesRepo.load(PriceAnchorSnapshot.class);
+        if (ps != null && ps.recent != null) {
+            priceAnchor.restore(ps.recent);
+        }
+        plugin.getLogger().info("PriceAnchor loaded: "
+                + (ps == null || ps.recent == null ? 0 : ps.recent.size()) + " items with market history");
+
+        GoldSnapshot gs = goldRepo.load(GoldSnapshot.class);
+        if (gs != null) {
+            gold.restore(gs.holdings, gs.seeded);
+        }
+        plugin.getLogger().info("Gold loaded: " + gold.outstanding() + " bars outstanding, treasury " + gold.treasury());
     }
 
-    private void loadPrices() {
-        if (!Files.exists(pricesFile)) {
-            return;
-        }
-        try {
-            String raw = Files.readString(pricesFile);
-            PriceAnchorSnapshot snap = gson.fromJson(raw, PriceAnchorSnapshot.class);
-            if (snap != null && snap.recent != null) {
-                priceAnchor.restore(snap.recent);
-            }
-            plugin.getLogger().info("PriceAnchor loaded: " + (snap == null || snap.recent == null ? 0 : snap.recent.size())
-                    + " items with market history");
-        } catch (Exception e) {
-            plugin.getLogger().severe("Failed to load prices data: " + e.getMessage());
-            quarantine(pricesFile);
-        }
-    }
-
-    private void loadGold() {
-        if (!Files.exists(goldFile)) {
-            return;
-        }
-        try {
-            String raw = Files.readString(goldFile);
-            GoldSnapshot snap = gson.fromJson(raw, GoldSnapshot.class);
-            if (snap != null) {
-                gold.restore(snap.holdings, snap.seeded);
-            }
-            plugin.getLogger().info("Gold loaded: " + gold.outstanding() + " bars outstanding, treasury " + gold.treasury());
-        } catch (Exception e) {
-            plugin.getLogger().severe("Failed to load gold data: " + e.getMessage());
-            quarantine(goldFile);
-        }
-    }
-
-    private void quarantine(Path file) {
-        try {
-            Files.move(file, file.resolveSibling(file.getFileName().toString() + ".corrupt-" + System.currentTimeMillis()),
-                    StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException ignored) {
-            // 保留原文件
-        }
-    }
-
-    /** 请求异步落盘（市场或银行变更后调用）。 */
+    /** 请求异步落盘（任何模块变更后调用）。 */
     public void requestSave() {
         if (market == null || bank == null || io.isShutdown()) {
             return;
@@ -395,53 +265,42 @@ public final class Storage {
     private void save() {
         MarketSnapshot ms = new MarketSnapshot();
         ms.listings = new ArrayList<>(market.listingsSnapshot());
-        writeJson(marketFile, ms);
+        marketRepo.save(ms);
 
         BankSnapshot bs = new BankSnapshot();
         bs.accounts = new ArrayList<>(bank.accountsSnapshot());
         bs.ledger = new ArrayList<>(bank.ledgerSnapshot());
-        writeJson(bankFile, bs);
+        bankRepo.save(bs);
 
         LuxurySnapshot ls = new LuxurySnapshot();
         ls.listings = new ArrayList<>(luxury.snapshot());
-        writeJson(luxuryFile, ls);
+        luxuryRepo.save(ls);
 
         MailboxSnapshot mbs = new MailboxSnapshot();
         mbs.entries = new ArrayList<>(mailbox.snapshot());
-        writeJson(mailboxFile, mbs);
+        mailboxRepo.save(mbs);
 
         BondSnapshot bds = new BondSnapshot();
         bds.bonds = new ArrayList<>(bonds.snapshot());
-        writeJson(bondFile, bds);
+        bondRepo.save(bds);
 
         FuturesSnapshot fs = new FuturesSnapshot();
         fs.contracts = new ArrayList<>(futures.snapshot());
         fs.positions = new ArrayList<>(futures.positionsSnapshot());
-        writeJson(futuresFile, fs);
+        futuresRepo.save(fs);
 
         OptionsSnapshot os = new OptionsSnapshot();
         os.contracts = new ArrayList<>(options.snapshot());
-        writeJson(optionsFile, os);
+        optionsRepo.save(os);
 
         PriceAnchorSnapshot ps = new PriceAnchorSnapshot();
         ps.recent.putAll(priceAnchor.snapshot());
-        writeJson(pricesFile, ps);
+        pricesRepo.save(ps);
 
         GoldSnapshot gs = new GoldSnapshot();
         gs.seeded = gold.isSeeded();
         gs.holdings.putAll(gold.snapshot());
-        writeJson(goldFile, gs);
-    }
-
-    private void writeJson(Path file, Object obj) {
-        try {
-            Files.createDirectories(file.getParent());
-            Path tmp = file.resolveSibling(file.getFileName().toString() + ".tmp");
-            Files.writeString(tmp, gson.toJson(obj));
-            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException e) {
-            plugin.getLogger().severe("Failed to write data file " + file.getFileName() + ": " + e.getMessage());
-        }
+        goldRepo.save(gs);
     }
 
     /** 禁用时同步落盘并关闭 IO。 */

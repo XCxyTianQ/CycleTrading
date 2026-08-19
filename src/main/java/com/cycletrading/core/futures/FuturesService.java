@@ -4,6 +4,7 @@ import com.cycletrading.CycleTradingPlugin;
 import com.cycletrading.core.Items;
 import com.cycletrading.core.bank.Bank;
 import com.cycletrading.core.bank.TxEntry;
+import com.cycletrading.util.MaturityQueue;
 import com.cycletrading.sched.Scheduler;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -41,11 +42,11 @@ public final class FuturesService {
 
     private final CycleTradingPlugin plugin;
     private final ConcurrentHashMap<Long, FuturesContract> contracts = new ConcurrentHashMap<>();
-    private final PriorityQueue<FuturesContract> settlement = new PriorityQueue<>(Comparator.comparingLong(c -> c.matureAt));
+    private final MaturityQueue<FuturesContract> settlement = new MaturityQueue<>();
     private final AtomicLong nextId = new AtomicLong(1);
 
     private final ConcurrentHashMap<Long, FuturesPosition> positions = new ConcurrentHashMap<>();
-    private final PriorityQueue<FuturesPosition> posQueue = new PriorityQueue<>(Comparator.comparingLong(p -> p.matureAt));
+    private final MaturityQueue<FuturesPosition> posQueue = new MaturityQueue<>();
     private final AtomicLong nextPosId = new AtomicLong(1);
 
     private Bank bank;

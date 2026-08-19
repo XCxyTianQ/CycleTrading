@@ -3,6 +3,7 @@ package com.cycletrading.core.bond;
 import com.cycletrading.CycleTradingPlugin;
 import com.cycletrading.core.bank.Bank;
 import com.cycletrading.core.bank.TxEntry;
+import com.cycletrading.util.Money;import com.cycletrading.util.MaturityQueue;
 import com.cycletrading.sched.Scheduler;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -33,7 +34,7 @@ public final class BondService {
 
     private final CycleTradingPlugin plugin;
     private final ConcurrentHashMap<Long, Bond> bonds = new ConcurrentHashMap<>();
-    private final PriorityQueue<Bond> maturity = new PriorityQueue<>(Comparator.comparingLong(b -> b.matureAt));
+    private final MaturityQueue<Bond> maturity = new MaturityQueue<>();
     private final AtomicLong nextId = new AtomicLong(1);
 
     private Bank bank;
@@ -212,7 +213,5 @@ public final class BondService {
         return (left + DAY_TICKS - 1) / DAY_TICKS;
     }
 
-    public static String fmtRate(int rateBp) {
-        return String.format("%.2f", rateBp / 100.0) + "%";
-    }
+    public static String fmtRate(int rateBp) { return Money.fmtRate(rateBp); }
 }
